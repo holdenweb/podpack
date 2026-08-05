@@ -1,0 +1,132 @@
+name: holdenweb-lab-pg
+
+# The PostgreSQL sibling of ../podman. Same principle: a Flask app plus a
+# database server, where neither container owns any state or any host-specific
+# setting.
+#
+#   * persistent state  -> bind-mounted from ${HOST_DATA_DIR} on the host
+#   * host-specific cfg -> bind-mounted read-only from ./config
+#   * secrets / wiring  -> environment, via .env
+#
+# Unlike its Mongo sibling, this one mirrors the real holdenweb stack:
+# Flask-SQLAlchemy over psycopg2, connecting with SQLALCHEMY_DATABASE_URI.
+
+services:
+  # Bind-mounted host directories arrive owned by whoever owns them on the
+  # host, which is never the unprivileged uid a server drops to. This
+  # short-lived root container fixes that once, before anything else starts,
+  # so the suite comes up on a bare machine with no manual chown step.
+  #
+  # It is not a security hole: under rootless podman "root" here is your own
+  # user in a namespace, and uid 999/10001 map to your subuids. On macOS the
+  # change is namespace-local -- the host keeps its own ownership.
+  init-storage:
+    image: docker.io/library/busybox:1.37
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        chown -R 999:999     /mnt/pg-data /mnt/pg-logs
+        chown -R 10001:10001 /mnt/uploads /mnt/web-logs
+        echo "host storage ownership prepared"
+    volumes:
+      - ${HOST_DATA_DIR}/postgres:/mnt/pg-data
+      - ${HOST_DATA_DIR}/uploads:/mnt/uploads
+      - ${HOST_LOG_DIR}/postgres:/mnt/pg-logs
+      - ${HOST_LOG_DIR}/web:/mnt/web-logs
+
+  postgres:
+    image: docker.io/library/postgres:17
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Consumed once, by the image's first-run bootstrap, to create the
+      # superuser and the database. The application never uses these; see
+      # db-init/ for the least-privileged role it does use.
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # A sub-directory of the mount, not the mount point itself. PostgreSQL
+      # refuses to start unless its data directory is mode 0700, and a bind
+      # mount point's permissions are decided by the host (on macOS virtiofs
+      # they come out 0777). A directory *inside* the mount is created by
+      # initdb, so it gets the mode PostgreSQL insists on.
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    # Take the server's settings from the host-mounted config rather than from
+    # the copy initdb writes into the data directory, so tuning the database on
+    # a real host is an edit-and-restart rather than a compose change.
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    volumes:
+      # Host storage. On SELinux hosts (RHEL/Fedora) append `,Z` to each of
+      # these; on macOS/Windows podman machine the label is unnecessary.
+      - ${HOST_DATA_DIR}/postgres:/var/lib/postgresql/data
+      - ${HOST_LOG_DIR}/postgres:/var/log/postgresql
+      # Host-specific configuration, read-only (append `,z` under SELinux).
+      # postgresql.conf points hba_file and ident_file at its two companions,
+      # so all three must be mounted together.
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./config/pg_ident.conf:/etc/postgresql/pg_ident.conf:ro
+      # First-run bootstrap; only runs while the data directory is empty.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      init-storage:
+        condition: service_completed_successfully
+    ports:
+      # Bound to loopback so the lab database is reachable from psql on the
+      # host, but never from the network.
+      - "127.0.0.1:${POSTGRES_HOST_PORT}:5432"
+    healthcheck:
+      # -U/-d matter: without them pg_isready reports the *server* is up before
+      # the bootstrap has finished creating the application's database.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_ADMIN_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: localhost/holdenweb-lab-pg-web:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # The same variable name the real application uses, so the app code does
+      # not have to know it is in a lab. `postgres` resolves on the compose
+      # network.
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      APP_CONFIG: /etc/holdenweb/app.toml
+      APP_UPLOAD_DIR: /var/lib/holdenweb/uploads
+      APP_LOG_DIR: /var/log/holdenweb
+    volumes:
+      # As above: add `,Z` to the writable mounts and `,z` to the read-only
+      # one on SELinux hosts. See README, "Running on Linux".
+      - ${HOST_DATA_DIR}/uploads:/var/lib/holdenweb/uploads
+      - ${HOST_LOG_DIR}/web:/var/log/holdenweb
+      - ./config/app.toml:/etc/holdenweb/app.toml:ro
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT}:8000"
+    depends_on:
+      init-storage:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # A script, not a `python -c` one-liner: podman splits ["CMD", ...]
+      # arguments on whitespace, so any argument containing spaces arrives
+      # mangled. See app/healthcheck.py.
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s

@@ -1,0 +1,27 @@
+# Host-specific application configuration, bind-mounted read-only at
+# /etc/holdenweb/app.toml. Anything that varies between laptop, staging and
+# production but is *not* a secret belongs here; secrets stay in the
+# environment (.env). Edit and `podman compose restart web` to apply.
+
+[site]
+name = "holdenweb.com (podman PostgreSQL lab)"
+environment = "local"
+base_url = "http://localhost:8458"
+
+[content]
+# Mirrors the real app's content topology switch: empty base_url means read
+# content locally, set it to use the HTTP content source.
+base_url = ""
+cache_ttl = 300
+
+[database]
+# Passed straight to SQLAlchemy's engine. The URI itself is a secret (it
+# carries the password) and so lives in the environment, not here.
+pool_size = 5
+max_overflow = 5
+pool_pre_ping = true
+echo = false
+
+[limits]
+max_upload_bytes = 1048576
+notes_page_size = 20
