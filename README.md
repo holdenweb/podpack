@@ -17,6 +17,14 @@ apps = ["podpack_notes"]
 Adding a feature to a running site is a line in that file and a restart — no
 code change, no rebuild, and no change to `compose.yaml`.
 
+**One site per instance.** podpack builds a single site. It does not serve
+several domains from one process and there is no host-based routing; running two
+sites means two deployments — same packages, different config and different
+containers. That limit is deliberate, and it is what buys the simplicity
+elsewhere: one `db.metadata`, one alembic history, and one app list to reason
+about, rather than a registry keyed by hostname and a migration story per
+tenant.
+
 The container suite is arranged so that **no state and no host-specific setting
 lives inside a container**: persistent state is bind-mounted from
 `$HOST_DATA_DIR`, host-specific configuration read-only from `./config`, and
