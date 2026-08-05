@@ -30,13 +30,17 @@ services:
       - |
         set -e
         chown -R 999:999     /mnt/pg-data /mnt/pg-logs
-        chown -R 10001:10001 /mnt/uploads /mnt/web-logs
+        chown -R 10001:10001 /mnt/app-data /mnt/app-logs
         echo "host storage ownership prepared"
     volumes:
+      # The two app roots are handed to the web container's uid wholesale, and
+      # PostgreSQL's directories to its own -- which is why apps live under an
+      # `apps/` level rather than beside `postgres/`. A single recursive chown
+      # over $HOST_DATA_DIR would take the database's data directory with it.
       - ${HOST_DATA_DIR}/postgres:/mnt/pg-data
-      - ${HOST_DATA_DIR}/uploads:/mnt/uploads
+      - ${HOST_DATA_DIR}/apps:/mnt/app-data
       - ${HOST_LOG_DIR}/postgres:/mnt/pg-logs
-      - ${HOST_LOG_DIR}/web:/mnt/web-logs
+      - ${HOST_LOG_DIR}/apps:/mnt/app-logs
 
   postgres:
     image: docker.io/library/postgres:17
@@ -106,14 +110,17 @@ services:
       # not have to know it is in a lab. `postgres` resolves on the compose
       # network.
       SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      APP_CONFIG: /etc/holdenweb/app.toml
-      APP_UPLOAD_DIR: /var/lib/holdenweb/uploads
-      APP_LOG_DIR: /var/log/holdenweb
+      PODPACK_CONFIG: /etc/holdenweb/app.toml
+      # Roots, not per-app directories. podpack creates a subdirectory of each
+      # for every installed app, so nothing here changes when the app list
+      # does -- installing a feature stays an edit to app.toml and a restart.
+      PODPACK_DATA_ROOT: /var/lib/holdenweb/apps
+      PODPACK_LOG_ROOT: /var/log/holdenweb/apps
     volumes:
       # As above: add `,Z` to the writable mounts and `,z` to the read-only
       # one on SELinux hosts. See README, "Running on Linux".
-      - ${HOST_DATA_DIR}/uploads:/var/lib/holdenweb/uploads
-      - ${HOST_LOG_DIR}/web:/var/log/holdenweb
+      - ${HOST_DATA_DIR}/apps:/var/lib/holdenweb/apps
+      - ${HOST_LOG_DIR}/apps:/var/log/holdenweb/apps
       - ./config/app.toml:/etc/holdenweb/app.toml:ro
     ports:
       - "127.0.0.1:${WEB_HOST_PORT}:8000"

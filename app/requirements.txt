@@ -1,6 +1,0 @@
-# Deliberately the same database stack the real holdenweb package uses, so
-# what works here has a fair chance of working there.
-flask>=3.0
-flask-sqlalchemy>=3.1.1
-psycopg2-binary>=2.9.10
-gunicorn>=22.0

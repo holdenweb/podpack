@@ -1,4 +1,4 @@
-# Host-specific application configuration, bind-mounted read-only at
+# Host-specific site configuration, bind-mounted read-only at
 # /etc/holdenweb/app.toml. Anything that varies between laptop, staging and
 # production but is *not* a secret belongs here; secrets stay in the
 # environment (.env). Edit and `podman compose restart web` to apply.
@@ -8,15 +8,17 @@ name = "holdenweb.com (podman PostgreSQL lab)"
 environment = "local"
 base_url = "http://localhost:8458"
 
-[content]
-# Mirrors the real app's content topology switch: empty base_url means read
-# content locally, set it to use the HTTP content source.
-base_url = ""
-cache_ttl = 300
+# The site's installed apps, in the order they are installed. This list is what
+# a site mostly *is*: adding a feature is a line here and a restart, with no
+# code change, no rebuild and no change to compose.yaml. Order matters -- nav
+# entries appear in it, and an app's init may rely on an earlier app's service.
+apps = ["podpack_notes"]
 
 [database]
 # Passed straight to SQLAlchemy's engine. The URI itself is a secret (it
-# carries the password) and so lives in the environment, not here.
+# carries the password) and so lives in the environment, not here. Only the
+# keys actually named here are passed on, so a site on a dialect that does not
+# pool this way simply leaves them out.
 pool_size = 5
 max_overflow = 5
 pool_pre_ping = true
@@ -24,4 +26,8 @@ echo = false
 
 [limits]
 max_upload_bytes = 1048576
-notes_page_size = 20
+
+# Each installed app gets its own namespace, so a site can tune one without
+# touching another, and podpack never has to know what any of it means.
+[apps.notes]
+page_size = 20

@@ -14,14 +14,21 @@ fi
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 
-# Note what is *not* here: $HOST_DATA_DIR/postgres/pgdata. PostgreSQL insists
-# its data directory be mode 0700, and a bind mount point's permissions belong
-# to the host -- so initdb creates that sub-directory itself, inside the mount.
+# Note what is *not* here, in either direction.
+#
+# $HOST_DATA_DIR/postgres/pgdata is absent because PostgreSQL insists its data
+# directory be mode 0700, and a bind mount point's permissions belong to the
+# host -- so initdb creates that sub-directory itself, inside the mount.
+#
+# The per-app directories under apps/ are absent because podpack creates them
+# at startup, named after whatever is installed. That is the point of mounting
+# the roots: installing an app must never require a change here or to
+# compose.yaml.
 for dir in \
     "${HOST_DATA_DIR}/postgres" \
-    "${HOST_DATA_DIR}/uploads" \
+    "${HOST_DATA_DIR}/apps" \
     "${HOST_LOG_DIR}/postgres" \
-    "${HOST_LOG_DIR}/web"
+    "${HOST_LOG_DIR}/apps"
 do
     mkdir -p "$dir"
     echo "ready: $dir"
@@ -36,6 +43,6 @@ done
 # init-storage service handles it in either case.
 if [[ "$(uname -s)" == "Linux" ]]; then
     podman unshare chown -R 999:999 "${HOST_DATA_DIR}/postgres" "${HOST_LOG_DIR}/postgres"
-    podman unshare chown -R 10001:10001 "${HOST_DATA_DIR}/uploads" "${HOST_LOG_DIR}/web"
+    podman unshare chown -R 10001:10001 "${HOST_DATA_DIR}/apps" "${HOST_LOG_DIR}/apps"
     echo "ownership set for the containers' unprivileged uids"
 fi
