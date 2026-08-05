@@ -24,6 +24,12 @@ COPY src/ ./src/
 COPY README.md ./
 RUN uv sync --frozen --no-dev
 
+# The migration environment ships in the image because the `migrate` service
+# runs from it: the schema a build expects and the code that expects it then
+# travel together and cannot be deployed out of step.
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+
 # The container healthcheck runs this. It is a file rather than a `python -c`
 # one-liner because podman splits ["CMD", ...] arguments on whitespace; see the
 # module docstring.

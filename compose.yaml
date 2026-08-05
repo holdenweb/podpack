@@ -97,6 +97,33 @@ services:
       retries: 12
       start_period: 20s
 
+  # Schema changes run once, here, rather than from inside the application.
+  # gunicorn starts several workers at once, so anything that creates tables at
+  # boot is a race the losers crash on -- which is why the old demo's
+  # `create_all` had to be wrapped in a try/except. A one-shot service gated by
+  # `service_completed_successfully`, the same pattern init-storage uses, means
+  # `web` cannot start against a schema that has not been brought up to date.
+  #
+  # It needs no data or log mounts: building the target metadata imports the
+  # installed apps' models and nothing else, with no Flask app in sight.
+  migrate:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: localhost/holdenweb-lab-pg-web:latest
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PODPACK_CONFIG: /etc/holdenweb/app.toml
+    volumes:
+      - ./config/app.toml:/etc/holdenweb/app.toml:ro
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   web:
     build:
       context: .
@@ -129,6 +156,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       # A script, not a `python -c` one-liner: podman splits ["CMD", ...]
       # arguments on whitespace, so any argument containing spaces arrives

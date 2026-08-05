@@ -118,6 +118,19 @@ def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
     return site_app
 
 
+def import_app_models(names) -> None:
+    """Import every named app's models, and nothing else about the apps.
+
+    The migration environment needs an app's tables on `db.metadata` but has no
+    use for its blueprint, its templates or its data directory -- and no way to
+    create the last of those, since it runs without a Flask app. Keeping this
+    separate from `install_apps` is what lets alembic work without one.
+    """
+    for name in names:
+        import_module(name)
+        _import_if_present(f"{name}.models")
+
+
 def _import_if_present(module_name: str) -> None:
     """Import a module only if the app actually has one.
 

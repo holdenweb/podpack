@@ -109,6 +109,25 @@ def test_app_config_is_namespaced(client, app):
         assert app_config("notes") == {"page_size": 5}
 
 
+def test_migration_metadata_needs_no_application(tmp_path, monkeypatch):
+    """The migration environment must not need a Flask app, or its secrets.
+
+    Building the target metadata deliberately does not call `create_app`, so
+    that a broken factory is not also a broken migration. Deleting both
+    variables `create_app` requires is what proves the independence: if this
+    ever starts building an app, it will fail here rather than in production.
+    """
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
+
+    config = tmp_path / "app.toml"
+    config.write_text('[site]\nname = "x"\napps = ["podpack_notes"]\n')
+
+    from podpack.migrations import target_metadata
+
+    assert "notes" in target_metadata(config).tables
+
+
 def test_unknown_app_is_a_boot_failure(site):
     with pytest.raises(ModuleNotFoundError):
         site(host_config={"site": {"name": "x", "environment": "test", "apps": ["no_such_app"]}})
