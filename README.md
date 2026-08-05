@@ -1,16 +1,27 @@
-# Containerised Flask + PostgreSQL lab
+# podpack
 
-A podman suite running a Flask app and a PostgreSQL server, arranged so that
-**no state and no host-specific setting lives inside a container**. The point is
-to exercise production-shaped code locally: the same compose file, images and
-config files can be promoted to a real host by editing `.env` alone.
+A framework for building web sites out of pluggable apps, together with the
+container substrate that runs them.
 
-There is a MongoDB sibling, near-identical in shape and on different ports so the
-two can run side by side. It no longer sits next to this directory: this lab was
-moved out into its own project, and the Mongo one stayed behind in the
-holdenweb.com working tree. Since the real holdenweb application is a Postgres
-application, this one goes further and uses the same database stack it does:
-**Flask-SQLAlchemy over psycopg2, wired up through `SQLALCHEMY_DATABASE_URI`**.
+**A site is a config file plus a list of installed apps.** podpack supplies the
+application factory, the app registry, the template search order and the
+migration wiring. The site supplies its own chrome and its app list. Apps ship
+as ordinary Python packages and are installed by name:
+
+```toml
+[site]
+name = "example.com"
+apps = ["podpack_notes"]
+```
+
+Adding a feature to a running site is a line in that file and a restart — no
+code change, no rebuild, and no change to `compose.yaml`.
+
+The container suite is arranged so that **no state and no host-specific setting
+lives inside a container**: persistent state is bind-mounted from
+`$HOST_DATA_DIR`, host-specific configuration read-only from `./config`, and
+secrets arrive through the environment. Promotion to a real host is an edit of
+`.env` alone.
 
 ## Quick start
 
@@ -20,25 +31,198 @@ From the root of this repository:
 ./scripts/prepare-host-dirs.sh && podman compose up -d --build
 ```
 
-Then:
+Then visit <http://localhost:8458/>, or ask the site where it keeps its state:
 
 ```bash
-curl -s localhost:8458/ | python3 -m json.tool
+curl -s localhost:8458/_status | python3 -m json.tool
 ```
 
-The index route reports where each piece of its state came from — the config
-file it read, whether the upload mount is writable, and which database, role and
-schema it is actually connected as. That is the whole point of the demo app: if
-a mount or a grant is wrong, this route says so.
+That route reports the config file it read, every installed app with its data
+and log directories and whether they are writable, and which database, role and
+schema it is actually connected as. If a mount or a grant is wrong, it says so.
 
 Shut down with `podman compose down`. Host storage survives; see
 [Starting over](#starting-over).
+
+---
+
+# The plugin API
+
+An app is a package exposing **one module-level `site_app`**. Everything else is
+convention.
+
+```python
+# myapp/__init__.py
+from podpack import Section, SiteApp
+
+from .views import blueprint
+
+site_app = SiteApp(
+    name="myapp",
+    blueprint=blueprint,
+    url_prefix="/myapp",
+    nav=(Section("My App", "/myapp/"),),
+)
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Identifies the app everywhere: blueprint name, template namespace, data and log directory. One name, so knowing an app is installed tells you where all its parts are. |
+| `blueprint` | An ordinary Flask `Blueprint`. Give it `template_folder="templates"` if it has templates. |
+| `url_prefix` | Where its routes are mounted. `None` mounts at the site root. |
+| `nav` | `Section` entries contributed to the site's navigation, in installation order. |
+| `init` | Optional `callable(app)`, run before the blueprint is registered, for config keys and services. |
+
+Install it by adding its **import name** to `apps` in the site's config file.
+Apps are installed in the order listed: nav entries appear in that order, and an
+app's `init` may rely on a service an earlier one registered.
+
+## Templates
+
+Put templates under `templates/<name>/`, and refer to them the same way:
+
+```python
+render_template("myapp/index.html")
+```
+
+The namespace is what stops two installed apps colliding on `index.html`. The
+search order is:
+
+```
+site templates  ->  app templates  ->  podpack defaults
+```
+
+Flask already searches the application's template folder before any blueprint's,
+and the *site* is the application — so a site overrides any app template simply
+by shipping one at the same namespaced path. podpack's own templates are
+appended last, which is why an app that extends `base.html` renders correctly on
+a site that has not written any chrome of its own yet.
+
+## Models
+
+Put them in `models.py`. Nothing needs to import it:
+
+```python
+# myapp/models.py
+from podpack import db
+
+
+class Thing(db.Model):
+    __tablename__ = "things"
+    id = db.Column(db.Integer, primary_key=True)
+```
+
+The registry imports that module while installing the app, and defining a
+`db.Model` subclass registers it on `db.metadata` as an import side effect. That
+import is the whole of model registration — and it is why migrations can see an
+app that the migration environment has never heard of. See
+[Migrations](#migrations) for the consequence.
+
+Name no schema. The application role's `search_path` points at the `app` schema
+it owns, so unqualified names land in the right place and alembic needs no
+schema configuration either.
+
+## Data and logs
+
+Every installed app gets a subdirectory of the host-mounted roots, named after
+the app:
+
+```
+<data root>/<name>/     persistent data the app owns
+<log root>/<name>/      logs it writes
+```
+
+Resolve them with `podpack.paths.data_dir()` and `log_dir()`, which default to
+the app handling the current request. An app never builds these paths itself, so
+moving them at deployment time is a change to the environment and nothing else —
+and **installing an app never requires a change to `compose.yaml`**, because the
+roots are mounted and podpack creates the per-app directories inside them.
+
+File logging comes free: podpack attaches a handler to the app's package logger,
+so `logging.getLogger(__name__)` inside the app writes to `<name>.log` as well
+as to stdout.
+
+### Shipping data with an app
+
+An app may ship a `data/` directory inside its package. On install, podpack
+copies it into that app's host data directory **only if the target is empty**.
+
+That gives the same semantics as the database bootstrap in `db-init/`: "the
+first time on this machine", not "every time the container is recreated".
+Re-arming it means deleting the app's host data directory. The app then reads
+the *host* copy at runtime, so editing a shipped file on the host changes
+behaviour with no rebuild — the same property the mounted config files have.
+
+## Configuration
+
+Each app gets a namespace of its own in the site's config file:
+
+```toml
+[apps.myapp]
+page_size = 20
+```
+
+Read it with `podpack.app_config()`, which defaults to the app serving the
+current request. podpack never has to know what any of these settings mean.
+
+Secrets do not go here. The split throughout is: **non-secret settings that vary
+per host go in `config/`; secrets go in the environment.** Config files are
+version-controllable and reviewable; `.env` is not committed.
+
+---
+
+# Migrations
+
+One alembic history for the whole site. The metadata alembic compares against is
+built by importing the models of every app the *site configuration* says is
+installed, so migrations follow the app list.
+
+```bash
+# Generate a revision for whatever changed.
+podman compose run --rm migrate alembic revision --autogenerate -m "what changed"
+
+# Applied automatically at startup; run by hand like this.
+podman compose run --rm migrate alembic upgrade head
+```
+
+Because a revision's directory does not say which app it came from, its
+**message should**. See
+`alembic/versions/205fc0d0ce92_notes_app_initial_schema.py`.
+
+Building that metadata deliberately does *not* construct a Flask app. The
+factory needs a secret key and a database URI before it will run, and coupling
+migrations to it would make a broken factory a broken migration too.
+
+### The footgun: autogenerate sees only the apps that are enabled
+
+Run `--autogenerate` with an app missing from `apps` and alembic will faithfully
+propose **dropping that app's tables**, because from where it is standing they
+are tables no app claims. This is checked behaviour, not a theoretical risk.
+
+Always autogenerate against the full app list. Django avoids this with per-app
+migration directories; podpack has one history, and per-app histories
+(`version_locations` plus `branch_labels`) are the answer if this ever becomes
+painful enough to be worth the extra heads to reason about.
+
+### Adopting an existing database
+
+If the tables already exist, generate the revision against a scratch database
+and then baseline the real one rather than trying to apply it:
+
+```bash
+alembic stamp head
+alembic check     # should report no new upgrade operations
+```
+
+---
+
+# The container substrate
 
 ## Ports
 
 | Service | Host port | Why not the obvious one |
 | --- | --- | --- |
-| Flask | `127.0.0.1:8458` | 8456 is the real site's local port; 8457 is the Mongo lab |
+| Flask | `127.0.0.1:8458` | 8456 is the real site's local port; 8457 is the MongoDB lab |
 | PostgreSQL | `127.0.0.1:5433` | 5432 is very likely a natively installed `postgres` |
 
 Offset on purpose: a lab that silently binds the production port is a lab that
@@ -50,23 +234,23 @@ is reachable from the network. Change them in `.env` if they still clash.
 | What | Host location | Container location |
 | --- | --- | --- |
 | Database cluster | `$HOST_DATA_DIR/postgres/pgdata` | `/var/lib/postgresql/data/pgdata` |
-| Uploaded files | `$HOST_DATA_DIR/uploads` | `/var/lib/holdenweb/uploads` |
+| Per-app data | `$HOST_DATA_DIR/apps/<name>` | `/var/lib/holdenweb/apps/<name>` |
+| Per-app logs | `$HOST_LOG_DIR/apps/<name>` | `/var/log/holdenweb/apps/<name>` |
 | PostgreSQL log | `$HOST_LOG_DIR/postgres/postgresql.log` | `/var/log/postgresql` |
-| App log | `$HOST_LOG_DIR/web/app.log` | `/var/log/holdenweb` |
 | Server settings | `config/postgresql.conf` | `/etc/postgresql/postgresql.conf` (ro) |
 | Client authentication | `config/pg_hba.conf` | `/etc/postgresql/pg_hba.conf` (ro) |
 | Username mapping | `config/pg_ident.conf` | `/etc/postgresql/pg_ident.conf` (ro) |
-| App settings | `config/app.toml` | `/etc/holdenweb/app.toml` (ro) |
+| Site settings | `config/app.toml` | `/etc/holdenweb/app.toml` (ro) |
 | Secrets and wiring | `.env` | environment variables |
 
 `HOST_DATA_DIR` and `HOST_LOG_DIR` default to `./hostdata` and `./hostlogs`
-(both gitignored) so the lab is self-contained. On a real host they become
+(both gitignored) so the suite is self-contained. On a real host they become
 absolute — `/srv/holdenweb/data`, `/var/log/holdenweb` — and nothing else needs
 to change.
 
-The split worth internalising: **non-secret settings that vary per host go in
-`config/`; secrets go in the environment.** Config files are
-version-controllable and reviewable; `.env` is not committed.
+Apps live under an `apps/` level rather than beside `postgres/` so that the two
+ownership fixes cannot reach each other: a single recursive chown of the data
+root would take the database's data directory with it.
 
 ### Why the data directory is a sub-directory
 
@@ -99,7 +283,7 @@ podman compose exec -u postgres postgres pg_ctl reload
 
 ```bash
 podman compose up -d              # after editing .env (recreates containers)
-podman compose up -d --build      # after editing app/ or the Containerfile
+podman compose up -d --build      # after editing src/ or the Containerfile
 ```
 
 Editing a mounted config file needs no rebuild and no image change, which is
@@ -128,11 +312,11 @@ little for it beyond startup:
 tail -f hostlogs/postgres/postgresql.log
 ```
 
-The Flask app logs to both stdout and the host, so either works:
+The site logs to stdout, and each app additionally to its own file:
 
 ```bash
 podman compose logs -f web
-tail -f hostlogs/web/app.log
+tail -f hostlogs/apps/notes/notes.log
 ```
 
 ## Talking to the database directly
@@ -162,28 +346,12 @@ least-privileged application role. It:
 - creates a schema `app` **owned by** that role, so it can create its own
   tables without any privilege over the rest of the database,
 - sets the role's `search_path` to that schema, so unqualified table names land
-  there — which is why the model in [`app/app.py`](app/app.py) names no schema,
-  exactly as the real application's models do,
+  there — which is why apps' models name no schema,
 - revokes `CREATE` on `public` from `PUBLIC`, making the intent explicit.
 
 The image runs that directory **only while the data directory is empty** — and
 since the data directory is on the host, that means "the first time you bring
-the lab up on this machine", not "every time the container is recreated".
-
-## Schema creation, and what the real app does instead
-
-The demo app calls `db.create_all()` on startup, guarded because gunicorn starts
-several workers at once and the loser of that race would otherwise crash on a
-table another worker just created.
-
-That is fine for a lab with one table. The real holdenweb package uses
-**alembic**, which is the right answer once there is a schema worth migrating.
-If you point this lab at the real application, replace the `create_all` call
-with `alembic upgrade head` — either as a one-shot compose service that runs
-before `web` (the same `service_completed_successfully` pattern
-`init-storage` uses) or in the container's entrypoint. Note that the `app`
-schema owner and `search_path` above mean alembic needs no schema
-configuration either.
+the suite up on this machine", not "every time the container is recreated".
 
 ## Starting over
 
@@ -194,11 +362,12 @@ rm -rf hostdata hostlogs
 podman compose up -d
 ```
 
-Deleting `hostdata/postgres/pgdata` is what re-arms the bootstrap script.
+Deleting `hostdata/postgres/pgdata` is what re-arms the database bootstrap;
+deleting an app's directory under `hostdata/apps/` re-arms its data seeding.
 
 ## How the services fit together
 
-`init-storage` → `postgres` (waits for healthy) → `web`.
+`init-storage` → `postgres` (waits for healthy) → `migrate` → `web`.
 
 `init-storage` is a throwaway root container that hands the bind-mounted host
 directories to the unprivileged uids the servers actually run as (999 for
@@ -207,10 +376,22 @@ directory it does not own. It is not a privilege escalation: under rootless
 podman that "root" is your own user inside a namespace, and on macOS the
 ownership change is namespace-local — the host keeps its own ownership.
 
-The healthcheck is `pg_isready -U … -d …` rather than a bare `pg_isready`. The
-flags matter: without them it reports the *server* is accepting connections
-before the bootstrap has finished creating the application's database, and `web`
-starts too early.
+`migrate` runs `alembic upgrade head` once and exits, gated by
+`service_completed_successfully`, so `web` cannot start against a stale schema.
+Doing it here rather than in the application also removes a race: gunicorn
+starts several workers at once, and anything creating tables at boot means the
+losers crash on tables a sibling has just made.
+
+The database healthcheck is `pg_isready -U … -d …` rather than a bare
+`pg_isready`. The flags matter: without them it reports the *server* is
+accepting connections before the bootstrap has finished creating the
+application's database, and everything downstream starts too early.
+
+The web healthcheck runs [`container/healthcheck.py`](container/healthcheck.py)
+as a **script file**, not a `python -c` one-liner: podman splits `["CMD", ...]`
+healthcheck arguments on whitespace, so an inline probe arrives mangled and dies
+with a SyntaxError — reporting the container unhealthy however well it is
+actually running.
 
 ## Running on Linux
 
@@ -235,38 +416,18 @@ Both work:
   (`holdenweb-lab-pg_web_1`) rather than hyphens, so don't mix the two
   front-ends against the same project without taking the stack down first.
 
-## What the demo app is, and is not
-
-[`app/app.py`](app/app.py) exists to prove the plumbing: it reads host config,
-writes to PostgreSQL through Flask-SQLAlchemy, writes to the host uploads
-directory, and reports on all three. It is **not** the real holdenweb
-application — but unlike the Mongo lab it uses the same database stack, so
-what works here has a fair chance of working there.
-
-To point this lab at the real application, build the `web` service with the
-uv + uwsgi pattern the holdenweb.com repository uses in its own `Dockerfile`,
-keep `SQLALCHEMY_DATABASE_URI` pointed at the `postgres` service, and swap
-`create_all` for alembic as described above.
-
-### Endpoints
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/` | Where each piece of state lives; database, role and schema in use |
-| `GET` | `/healthz` | 200 only if `SELECT 1` succeeds; 503 otherwise |
-| `GET` | `/notes` | List stored notes, newest first |
-| `POST` | `/notes` | `{"text": "..."}` → stores a row |
-| `POST` | `/uploads/<name>` | Request body → a file in the host uploads directory |
-
-## Proving persistence
-
-The claim worth testing, since it is the whole reason the suite exists:
+## Development
 
 ```bash
-curl -sX POST -H 'Content-Type: application/json' -d '{"text":"survives"}' localhost:8458/notes
-curl -sX POST --data-binary 'hello' localhost:8458/uploads/probe.txt
-podman compose down          # both containers destroyed
-podman compose up -d
-curl -s localhost:8458/notes # the row is still there
-cat hostdata/uploads/probe.txt
+uv sync
+uv run pytest
 ```
+
+The tests cover what the registry promises — that the app list is configuration
+rather than code, that models reach `db.metadata`, that template namespacing and
+site override both work, that data seeds once and re-arms on deletion, and that
+the migration environment needs no Flask app.
+
+There is a MongoDB sibling of this substrate, near-identical in shape and on
+different ports so the two can run side by side. It stayed in the holdenweb.com
+working tree when this project was extracted.
