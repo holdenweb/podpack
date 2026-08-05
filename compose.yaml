@@ -1,6 +1,7 @@
 name: holdenweb-lab-pg
 
-# The PostgreSQL sibling of ../podman. Same principle: a Flask app plus a
+# The PostgreSQL lab. Same principle as its MongoDB sibling (which stayed in the
+# holdenweb.com working tree when this one moved out): a Flask app plus a
 # database server, where neither container owns any state or any host-specific
 # setting.
 #

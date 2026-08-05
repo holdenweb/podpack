@@ -5,17 +5,19 @@ A podman suite running a Flask app and a PostgreSQL server, arranged so that
 to exercise production-shaped code locally: the same compose file, images and
 config files can be promoted to a real host by editing `.env` alone.
 
-This is the PostgreSQL sibling of [../podman](../podman), which does the same
-thing with MongoDB. The two are deliberately near-identical in shape, and use
-different ports so they can run side by side. Since the real holdenweb
-application is a Postgres application, this one goes further and uses the same
-database stack it does: **Flask-SQLAlchemy over psycopg2, wired up through
-`SQLALCHEMY_DATABASE_URI`**.
+There is a MongoDB sibling, near-identical in shape and on different ports so the
+two can run side by side. It no longer sits next to this directory: this lab was
+moved out into its own project, and the Mongo one stayed behind in the
+holdenweb.com working tree. Since the real holdenweb application is a Postgres
+application, this one goes further and uses the same database stack it does:
+**Flask-SQLAlchemy over psycopg2, wired up through `SQLALCHEMY_DATABASE_URI`**.
 
 ## Quick start
 
+From the root of this repository:
+
 ```bash
-cd podman2 && ./scripts/prepare-host-dirs.sh && podman compose up -d --build
+./scripts/prepare-host-dirs.sh && podman compose up -d --build
 ```
 
 Then:
@@ -241,10 +243,10 @@ directory, and reports on all three. It is **not** the real holdenweb
 application — but unlike the Mongo lab it uses the same database stack, so
 what works here has a fair chance of working there.
 
-To point this lab at the real application, build the `web` service from the
-repository root using the pattern in the top-level [Dockerfile](../Dockerfile)
-(uv + uwsgi), keep `SQLALCHEMY_DATABASE_URI` pointed at the `postgres` service,
-and swap `create_all` for alembic as described above.
+To point this lab at the real application, build the `web` service with the
+uv + uwsgi pattern the holdenweb.com repository uses in its own `Dockerfile`,
+keep `SQLALCHEMY_DATABASE_URI` pointed at the `postgres` service, and swap
+`create_all` for alembic as described above.
 
 ### Endpoints
 
