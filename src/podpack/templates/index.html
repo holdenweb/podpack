@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ site.name }}</h2>
+{% if sections %}
+<p>This site has the following installed:</p>
+<ul>
+  {% for section in sections %}
+  <li><a href="{{ section.path }}">{{ section.label }}</a></li>
+  {% endfor %}
+</ul>
+{% else %}
+{# A site with no apps is a perfectly valid site; say so rather than showing an
+   empty list, so that an empty app list reads as configuration and not as a
+   failure to start. #}
+<p>No apps are installed yet. Add one to the <code>apps</code> list in this
+site's configuration file and restart.</p>
+{% endif %}
+<p><a href="/_status">Where this site keeps its state</a></p>
+{% endblock %}

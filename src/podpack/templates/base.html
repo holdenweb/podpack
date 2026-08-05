@@ -1,0 +1,50 @@
+{# The framework's default chrome.
+
+   Minimal on purpose. It exists so that an installed app renders as a usable
+   page on a site that has not written any chrome of its own yet; a real site
+   ships its own base.html at this same path, which Flask finds first because
+   the site is the application and podpack is only the fallback loader. #}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{{ title or site.name }}{% endblock %}</title>
+    {% block styles %}
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; line-height: 1.5;
+             color: #222; background: #fff; }
+      header { background: #24303c; color: #fff; padding: 1rem 1.5rem; }
+      header a { color: #fff; text-decoration: none; }
+      header h1 { margin: 0 0 .5rem; font-size: 1.25rem; }
+      nav ul { list-style: none; display: flex; gap: 1rem; margin: 0; padding: 0; }
+      main { max-width: 48rem; margin: 0 auto; padding: 1.5rem; }
+      .flashes { background: #fff6d8; border: 1px solid #e2c65a; padding: .5rem 1rem; }
+      footer { color: #667; font-size: .85rem; padding: 1.5rem; text-align: center; }
+    </style>
+    {% endblock %}
+  </head>
+  <body>
+    <header>
+      <h1><a href="/">{{ site.name }}</a></h1>
+      <nav>
+        <ul>
+          {% for section in sections %}
+          <li><a href="{{ section.path }}">{{ section.label }}</a></li>
+          {% endfor %}
+        </ul>
+      </nav>
+    </header>
+    <main>
+      {% with messages = get_flashed_messages() %}
+      {% if messages %}
+      <ul class="flashes">
+        {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer>Served by podpack &mdash; {{ site.environment }}</footer>
+  </body>
+</html>
