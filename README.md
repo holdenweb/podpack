@@ -49,8 +49,9 @@ That route reports the config file it read, every installed app with its data
 and log directories and whether they are writable, and which database, role and
 schema it is actually connected as. If a mount or a grant is wrong, it says so.
 
-Shut down with `podman compose down`. Host storage survives; see
-[Starting over](#starting-over).
+Shut down with `podman compose down`, and come back with `podman compose up -d`
+— not `start`; see [Stopping and starting](#stopping-and-starting). Host storage
+survives either way; see [Starting over](#starting-over).
 
 ---
 
@@ -297,6 +298,31 @@ podman compose up -d --build      # after editing src/ or the Containerfile
 Editing a mounted config file needs no rebuild and no image change, which is
 exactly the behaviour you want on a real host. `pg_hba.conf` is the one that can
 be applied without even a restart.
+
+### Stopping and starting
+
+These are two pairs, and mixing them is the easy mistake:
+
+```bash
+podman compose stop     # containers keep existing, merely stopped
+podman compose start    # ...so they can be started again
+
+podman compose down     # containers are REMOVED (network too)
+podman compose up -d    # ...so coming back has to recreate them
+```
+
+`start` only starts containers that already exist. After a `down` there are
+none, and it fails with `service "init-storage" has no container to start` —
+which reads like a fault in the one-shot service but is only saying the
+container is gone. `up -d` is always safe: it creates whatever is missing and
+starts the rest.
+
+Both routes leave host storage alone, so no data is lost either way.
+
+On the way up, either command honours the `depends_on` gates — `init-storage`
+and `migrate` run again before `web`. That is safe by design: the chown is
+idempotent and `alembic upgrade head` has nothing to do when the schema is
+already current.
 
 ### `ALTER SYSTEM` will fail, by design
 
