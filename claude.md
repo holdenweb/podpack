@@ -1,601 +1,283 @@
-Here's a description of a site creation and management framework, and the local directory contains its current implementation.
-I'd like you to hjelp me move this project forwards in a controlled way.
+Here's a description of a site creation and management framework. This directory
+contains the framework itself; two sibling projects consume it.
+I'd like you to help me move this project forwards in a controlled way.
 
+# Project brief: podpack, a system for building and running web sites
 
-
-# Project brief: a system for building and running web sites
-
-
-
-*Written 2026-08-05 to bring a fresh Claude Code session up to speed. Paste it,
-
-or point at it, at the start of a session.* Amended slightly by Steve in a manual
-
-edit to dictate goals and guardrails.
-
-
+*Written 2026-08-05 to bring a fresh Claude Code session up to speed. Amended by
+Steve to dictate goals and guardrails. Rewritten 2026-08-06, after the framework
+was built, to describe what now exists rather than what was planned.*
 
 ---
-
-
 
 ## 1. The goal
 
-
-
 **Build a system that lets Steve create and manage web sites easily and
-
 efficiently.** Not a single site — a repeatable way to stand one up, add
-
 functionality to it, and run it.
 
+`holdenweb.com` is the first site and doubles as the reference implementation:
+whatever the system turns out to be, that site should be expressible in it.
 
-
-`holdenweb.com` is the first site and, for now, doubles as the reference
-
-implementation: whatever the system turns out to be, this site should be
-
-expressible in it.
-
-
-
-**The immediate next step** is to make functionality pluggable: a way to add a
-
-group of endpoints — a blueprint, with its own templates, static files, models
-
-and configuration — so that adding a feature to a site is as close as possible
-
-to *adding a Django app to `INSTALLED_APPS`*.
-
-
+**Single sites only.** podpack builds one site per running instance. It does not
+serve several domains from one process and there is no host-based routing;
+running two sites means two deployments — same packages, different config and
+containers. This settles what an earlier draft of this brief called the question
+that changes the design more than anything else, and it is what justifies one
+`db.metadata`, one alembic history and one app list rather than registries keyed
+by hostname. Do not add `SERVER_NAME` handling or a site registry.
 
 ---
 
-
-
-## 2. Current state of the code
-
-
-
-Flask, Python ≥3.12, `src/` layout, packaged with `uv_build`, dependencies
-
-managed by `uv` (`uv.lock` is committed). Everything below is in this repo
-
-unless stated.
-
-
-
-### The application factory
-
-
-
-[`src/holdenweb/__init__.py`](src/holdenweb/__init__.py) is the whole
-
-application — 319 lines holding the factory, the models, and most of the views.
-
-
-
-- `create_app(config_overrides=None)` at line 231. Reads config from the
-
-  environment, applies overrides, calls `init_app` on each extension, then
-
-  registers blueprints.
-
-- Extensions (`mail`, `paranoid`, `db`, `security`) are created **unbound** at
-
-  module level (lines 70-73) and attached inside the factory, so multiple app
-
-  instances can coexist — tests rely on this.
-
-- `app = create_app()` and `application = app.wsgi_app` at module level (lines
-
-  315-316), because [`wsgi.py`](wsgi.py) imports them for uwsgi.
-
-
-
-### Blueprints today
-
-
-
-| Blueprint | Defined | Registered | Prefix |
-
-| --- | --- | --- | --- |
-
-| `main_bp` | line 88 of `__init__.py` | line 309 | none |
-
-| `pdf_blueprint` | [`src/holdenweb/pdf.py:17`](src/holdenweb/pdf.py) | line 310 | `/pdf/` |
-
-
-
-`pdf_blueprint` is the closest thing to a prototype "app" — but it is **not
-
-self-contained**: it renders `markdown.html` from the *main package's*
-
-`templates/`, and imports its forms from `holdenweb.forms`. Closing that gap is
-
-essentially the next step (§4).
-
-
-
-The intention is to allow automated discovery of all assets necessary (files,
-
-database tables. mongdb collections) to extend the functionality of the base site
-
-byscanning a specific portion of the configuration data detailing which additions
-
-are required. The "additions" will presumably need to conform to a standard API,
-
-which should initially be documented in the README.
-
-
-
-### Models and migrations
-
-
-
-- `Role` and `User` (lines 78-84) via `flask_security`'s `fsqla_v3` mixins.
-
-  That is the entire schema at present.
-
-- Migrations are alembic. **Critical detail for §4:**
-
-  [`alembic/env.py`](alembic/env.py) does `from holdenweb import db` (line 11)
-
-  and `target_metadata = db.metadata` (line 28). Autogenerate therefore only
-
-  sees models that have been imported by the time `env.py` runs.
-
-- `env.py` reads `SQLALCHEMY_DATABASE_URI` from the environment, so alembic and
-
-  the running app can never disagree about which database they mean.
-
-
-
-### Content
-
-
-
-[`src/holdenweb/content.py`](src/holdenweb/content.py) defines a
-
-`ContentSource` Protocol (`html`, `markdown`, `asset`) with two
-
-implementations:
-
-
-
-- `LocalContentSource` — reads `src/holdenweb/data/{html,md}-pages/`. The
-
-  default; no extra services in dev.
-
-- `HTTPContentSource` — fetches from `$CONTENT_BASE_URL` with an
-
-  `Authorization: Bearer $CONTENT_ACCESS_TOKEN` header. Enabled when both vars
-
-  are set; the app refuses to boot with only one.
-
-
-
-The chosen source is stashed at `app.extensions["content"]` (lines 291-306) and
-
-looked up by views via `current_app`. **This is the existing precedent for a
-
-per-app service registry** and worth reusing in §4.
-
-
-
-Assets inside pages are rewritten server-side to `/asset/...` and proxied by
-
-Flask, so browsers never talk to the content host directly and it can stay
-
-behind a shared secret. See the "Content topology" section of
-
-[README.md](README.md).
-
-
-
-However, there seems at present to be little justification for this complication,
-
-so until there is a specific need for it the HTTPContentSource should be mothballed.
-
-
-
-### Everything else
-
-
-
-- **Navigation** is a hardcoded `SECTIONS` list (lines 60-64). A pluggable app
-
-  will want to contribute entries to it — a real design point, not a detail.
-
-  Therefore the app loading process should be capable of integration into its
-
-  containing site's navigation.
-
-- **Templates/static** live in `src/holdenweb/templates/` and
-
-  `src/holdenweb/static/`, both package-level. Clearly apps must be capable
-
-  of using their own private templates, so the template-location process
-
-  should adapt to prefer app-private templates as default, though allowing
-
-  the site to provide overrides.
-
-- **Tests**: `tests/conftest.py`, `test_routes.py`, `test_content.py`. pytest,
-
-  with `responses` for HTTP stubbing and `playwright` available.
-
-- **Config** comes entirely from environment variables; see
-
-  [.env.example](.env.example) for the full set. `.env` is gitignored.
-
-- **Serving**: uwsgi via `pyuwsgi`. [`uwsgi.ini`](uwsgi.ini) is the production
-
-  file and is currently hardwired to Opalstack paths
-
-  (`/home/sholden/apps/second-alma/`). Those paths should instead be relative to
-
-  another configuration parameter, whose value the `deploy` utility should
-
-  play a part in establishing (perhaps in the form of an alication name) to allow
-
-  sites to be easily deployed as Opalstack apps on demand.
-
-- **Database in production**: PostgreSQL. The root
-
-  [`docker-compose.yml`](docker-compose.yml) reaches the *host's* Postgres via
-
-  `host.docker.internal`, with an `extra_hosts` alias so the same file works on
-
-  Docker Desktop, Linux Docker and Podman.
-
-  If there's an outstanding migration in alembic that should be committed to give
-
-  a baseline database definitition for all sites.
-
-
+## 2. Where the work lives
+
+| Directory | What it is | State |
+| --- | --- | --- |
+| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 7 commits, working |
+| `~/sites/hwpdf` | the PDF tools, extracted as a standalone installable package | 18 commits, the last four being the extraction; **not yet a podpack app** — see §5 |
+| `~/sites/holdenweb.com` | the original Flask site | untouched; **not yet adapted** — see §6 |
+
+Guardrail carried over from the earlier sessions and still in force: **do not
+change anything outside the current working directory without asking first.**
+Reading is fine.
 
 ---
 
+## 3. podpack: what now exists
 
+**A site is a config file plus a list of installed apps.**
 
-## 3. The container substrate
+```toml
+[site]
+name = "example.com"
+apps = ["podpack_notes"]
+```
 
+Adding a feature to a running site is a line in that file and a restart — no
+code change, no rebuild, no change to `compose.yaml`. The full plugin API is
+documented in [README.md](README.md); this is the shape of it.
 
+### The contract
 
-Two container labs were built (2026-08-04) to allow production-shaped code to
+An app is a package exposing **one module-level `site_app`**:
 
-be tested locally. Each runs a Flask app plus a database, with **no state and no
+```python
+from podpack import Section, SiteApp
+from .views import blueprint
 
-host-specific setting inside any container**:
+site_app = SiteApp(
+    name="myapp",              # blueprint name, template namespace, data/log dir
+    blueprint=blueprint,
+    url_prefix="/myapp",
+    nav=(Section("My App", "/myapp/"),),
+    init=None,                 # optional callable(app) for config and services
+)
+```
 
+Everything else is convention:
 
+- **`models.py`** — the registry imports it at install time. Defining a
+  `db.Model` subclass registers it on `db.metadata` as an import side effect,
+  which is the whole of model registration and the reason migrations can see an
+  app the migration environment has never heard of.
+- **`templates/<name>/`** — namespaced so two apps cannot collide. Search order
+  is **site → app → podpack defaults**; Flask already searches the application's
+  templates before any blueprint's, and podpack appends its own loader last, so
+  an app extending `base.html` renders correctly on a site with no chrome of its
+  own.
+- **`data/`** — shipped data, seeded to the host on install *only if the target
+  is empty*: the same "first time on this machine" rule as `db-init/`. The app
+  then reads the host copy, so editing it on the host takes effect with no
+  rebuild.
+- **`[apps.<name>]`** in the config file — the app's own config namespace, read
+  with `podpack.app_config()`.
+- **`<data root>/<name>/` and `<log root>/<name>/`** — per-app directories
+  created at startup. The compose file mounts the *roots*, which is what keeps
+  installing an app out of it. File logging is attached to the app's package
+  logger, so `logging.getLogger(__name__)` writes to `<name>.log` for free.
 
-- persistent state → bind-mounted from `$HOST_DATA_DIR`
+### Migrations
 
-- host-specific config → bind-mounted read-only from `./config`
+One alembic history. `podpack.migrations.target_metadata()` imports the
+installed apps' models and returns `db.metadata` — deliberately **without**
+building a Flask app, so a broken factory is not also a broken migration. A test
+deletes `SECRET_KEY` and `SQLALCHEMY_DATABASE_URI` to keep that honest.
 
-- secrets and wiring → environment, via `.env`
+A one-shot `migrate` compose service runs `alembic upgrade head` before `web`,
+gated by `service_completed_successfully`. That also retires the create_all race:
+gunicorn starts several workers at once and the losers crashed on tables a
+sibling had just made.
 
+**The footgun, verified rather than assumed:** autogenerate sees exactly the apps
+that are enabled, so running it with an app disabled really does propose
+`op.drop_table(...)` for that app's tables. Always autogenerate against the full
+app list. Per-app histories (`version_locations` plus `branch_labels`) are the
+answer if this ever gets painful enough to justify multiple heads.
 
+### Tests
 
-so promotion to a real host is an edit of `.env` alone.
+`uv run pytest` — 13 tests covering what the registry promises: the app list
+being configuration rather than code, models reaching `db.metadata`, template
+namespacing and site override, seeding once and re-arming, and the migration
+environment needing no Flask app.
 
+---
 
+## 4. The container substrate
 
-**Where they are now:** the PostgreSQL lab (`podman2/`) **has been moved into
+No state and no host-specific setting lives inside a container: persistent state
+bind-mounted from `$HOST_DATA_DIR`, host config read-only from `./config`,
+secrets through the environment. Promotion to a real host is an edit of `.env`.
 
-its own project** and is no longer in this repo. The MongoDB lab is still at
+`init-storage` → `postgres` (waits healthy) → `migrate` → `web`.
 
-[`podman/`](podman/), untracked. Whether it should also move, or be deleted, is
-
-an open housekeeping question.
-
-
-
-Both are working and verified: clean-slate build, data surviving container
-
-destruction, bootstrap not re-running, host-side DB access, config edits taking
-
-effect on restart with no rebuild.
-
-
+Verified on a clean slate: host storage deleted, cluster re-initialised,
+bootstrap re-run, and the migration creating the schema on PostgreSQL before the
+site came up.
 
 ### Gotchas already paid for — do not rediscover these
 
-
-
-1. **Bind-mount ownership.** Servers drop to unprivileged uids (999 for both
-
-   `postgres` and `mongod`, 10001 for the app image) and cannot write to host
-
-   directories they do not own — `mongod` crash-loops on its logfile. Fixed by
-
-   an `init-storage` service: a throwaway root container that chowns the mounts
-
-   before anything else starts, gated by
-
-   `depends_on: {condition: service_completed_successfully}`. Works on both
-
-   macOS virtiofs and rootless Linux.
-
+1. **Bind-mount ownership.** Servers drop to unprivileged uids (999 for
+   `postgres`, 10001 for the app) and cannot write to host directories they do
+   not own. Fixed by `init-storage`: a throwaway root container that chowns the
+   mounts before anything else starts, gated by
+   `depends_on: {condition: service_completed_successfully}`. Works on macOS
+   virtiofs and rootless Linux.
 2. **PostgreSQL demands mode 0700 on `PGDATA`**, and a bind mount point's
-
    permissions belong to the host (world-writable on macOS virtiofs). So the
-
    host directory mounts at `/var/lib/postgresql/data` and `PGDATA` points one
-
    level deeper at `.../data/pgdata`, which `initdb` creates itself. Never
-
    pre-create that sub-directory.
-
 3. **Podman splits `["CMD", ...]` healthcheck arguments on whitespace**, so an
-
-   inline `python -c "..."` probe arrives mangled and dies with a SyntaxError —
-
-   the container reports unhealthy however well it is running. Use a script
-
-   file (`["CMD", "python", "/app/healthcheck.py"]`). This one only shows up
-
-   under the Compose v2 provider, not `podman-compose`.
-
+   inline `python -c "..."` probe arrives mangled and dies with a SyntaxError.
+   Use a script file — `container/healthcheck.py`. Only shows up under the
+   Compose v2 provider, not `podman-compose`.
 4. **A PostgreSQL config file outside the data directory means initdb's
-
    generated one is ignored entirely** — so `hba_file` and `ident_file` must be
-
    named explicitly, and all three files mounted together. Upside:
-
    `ALTER SYSTEM` fails by design, keeping config in version control.
-
 5. **`pg_isready` needs `-U` and `-d`** in the healthcheck, or it reports the
-
    server ready before the bootstrap has created the application's database.
-
 6. **`pg_ctl reload` must run as `-u postgres`**; it refuses to run as root.
-
-7. **Ports on this machine.** 8456 is the real site's local port *and* a
-
-   long-running `holdenwebcom-web-1` container; 5432 is a native `postgres`;
-
-   27017 is a native `mongod`. The labs deliberately use 8457/27018 (Mongo) and
-
-   8458/5433 (Postgres).
-
+7. **Ports on this machine.** 8456 is the real site's local port; 5432 is a
+   native `postgres`; 27017 is a native `mongod`. This suite uses 8458/5433, and
+   the MongoDB lab 8457/27018.
 8. **Bootstrap scripts in `/docker-entrypoint-initdb.d` only run while the data
+   directory is empty** — and since it is on the host, that means "first time on
+   this machine", not "each time the container is recreated". Re-arming means
+   deleting the host data directory. App data seeding follows the same rule.
+9. **Apps live under an `apps/` level**, not beside `postgres/`, so the two
+   chowns cannot reach each other. A single recursive chown of the data root
+   would take the database's data directory with it and undo gotcha 2.
+10. **Do not give SQLAlchemy pool options it did not ask for.** SQLite's
+    StaticPool rejects `pool_size` outright, so podpack passes through only the
+    keys the site actually set. Supplying defaults made it unable to run on
+    SQLite at all.
+11. **Renaming the project directory breaks `.venv`.** Console-script shebangs
+    carry the absolute path, so every entry point silently fails to spawn after
+    a rename — `uv sync` will not repair it, because it audits packages rather
+    than scripts. `rm -rf .venv && uv sync --all-groups`. This bit when
+    `podman/` became `podpack/`.
 
-   directory is empty** — and since it is on the host, that means "first time
+### Still open here
 
-   on this machine", not "each time the container is recreated". Re-arming
-
-   means deleting the host data directory.
-
-
-
-### A decision taken but not implemented
-
-
-
-Publishing the *database* port to the host was discussed and judged worth
-
-dropping: deleting the `ports:` block from the database service is the entire
-
-change, since container-to-container traffic is unaffected by publishing, the
-
-app URIs already use internal ports, and the healthchecks run inside the
-
-containers. Host access would then be via `podman compose exec`, a throwaway
-
-container joined to the compose network, or an on-demand socat forwarder under
-
-a Compose profile. **The benefit is fidelity and removing a wrong-database
-
-footgun, not security** — the ports are already bound to loopback only.
-
-
+- The MongoDB lab is still untracked inside the `holdenweb.com` working tree.
+  Move it or delete it.
+- `config/app.toml` declares `base_url` and nothing reads it. Under single-site
+  that is a meaningful setting (canonical URL for mail and feeds) — so wire it
+  up or drop it.
 
 ---
 
+## 5. `hwpdf`: the first external plugin, and a contract mismatch
 
+`~/sites/hwpdf` extracts the PDF booklet and page-splitting tools into a
+standalone installable package. It is well-formed and tested — but it was built
+against the *speculative* discovery design in the earlier draft of this brief,
+not against the registry that actually got built. **The two do not currently fit
+together.** This is the most important thing on this page.
 
-## 4. The next step: pluggable "apps"
-
-
-
-**The ask:** add a group of endpoints, in a blueprint, in a way that makes
-
-installing a feature into a site feel like adding a Django app.
-
-
-
-### What a Django app bundles, and what Flask gives us free
-
-
-
-| Django app provides | Flask equivalent | Status |
-
+| | `hwpdf` today | podpack expects |
 | --- | --- | --- |
-
-| views + URLconf | `Blueprint` + `url_prefix` | free |
-
-| templates | `Blueprint(template_folder=...)` | free, but see collisions below |
-
-| static files | `Blueprint(static_folder=...)` | free |
-
-| management commands | `blueprint.cli` | free |
-
-| signals / startup hooks | `record_once`, `before_app_request` | free |
-
-| **models** | — | **missing** |
-
-| **migrations** | — | **missing** |
-
-| **`INSTALLED_APPS`** | — | **missing** |
-
-| **app registry / discovery** | — | **missing** |
-
-| **admin registration** | — | **missing** |
-
-| **nav contribution** | — | **missing** (`SECTIONS` is hardcoded) |
-
-
-
-So the work is not "how do I make a blueprint" — it is the four or five things
-
-Django bundles *around* the blueprint.
-
-
-
-### The specific obstacles in this codebase
-
-
-
-1. **Migrations are the hard part.** `alembic/env.py` reads `db.metadata` after
-
-   importing `holdenweb`. A pluggable app's models are invisible to autogenerate
-
-   unless something imports them first. Two credible routes:
-
-   - *Single migration history*: the registry imports every installed app's
-
-     models before alembic runs. Simple; but apps cannot be installed and
-
-     migrated independently.
-
-   - *Per-app history*: alembic's `version_locations` plus `branch_labels`,
-
-     giving each app its own migration directory and branch — the true Django
-
-     analogue. More moving parts, and multiple heads to reason about.
-
-2. **Template namespacing.** Flask searches blueprint template folders *after*
-
-   the app's, with no automatic namespacing — two apps shipping `index.html`
-
-   collide silently. Needs a convention: `templates/<appname>/page.html`.
-
-3. **`pdf_blueprint` is the test case.** Making it self-contained — its own
-
-   templates, its own forms — is the smallest honest proof that the mechanism
-
-   works. If the PDF tools can be lifted out and reinstalled unchanged, the
-
-   design holds.
-
-4. **Nav and chrome.** `SECTIONS` needs to become something apps contribute to,
-
-   or sites will keep needing hand-edits in the core package.
-
-5. **Config.** Each app may want its own keys and defaults. The existing
-
-   pattern — read env in the factory, stash the built object in
-
-   `app.extensions[...]` — is the obvious thing to generalise.
-
-
-
-### The discovery question
-
-
-
-How does a site declare which apps it has?
-
-
-
-- **Explicit list in config** — the literal `INSTALLED_APPS` analogue. Simple,
-
-  ordered, obvious.
-
-- **Python entry points** (`[project.entry-points."holdenweb.apps"]`) — a site
-
-  becomes a dependency list; `uv add` installs a feature. This fits the
-
-  existing `uv` + `uv_build` packaging unusually well, and fits the stated goal
-
-  ("create and manage web sites easily and efficiently") better than a list.
-
-- **Directory scan** — implicit and fragile; mentioned only to dismiss.
-
-
-
-A hybrid is plausible: entry points for discovery, explicit config for ordering
-
-and enablement.
-
-
-
-### Open questions to settle early
-
-
-
-- **One site or many?** "Web sites", plural. Does the system serve several
-
-  sites from one running instance (host-based routing — note `SERVER_NAME` is
-
-  already handled conditionally at line 242), or generate/deploy a separate
-
-  instance per site (separate container stack, same packages, different
-
-  config)? The container work so far implies the latter. **This changes the
-
-  design more than anything else on this page.**
-
-- **Is content a plugin?** The `ContentSource` abstraction already makes
-
-  content pluggable in one dimension. Is "the content-driven site" just the
-
-  first app, or is it core?
-
-- **How much of `__init__.py` moves?** It is currently factory + models + views
-
-  in one file. Extracting the factory into its own module, with `main_bp`
-
-  becoming just another installed app, is the natural shape — but it is a
-
-  bigger change than the first plugin.
-
-- **Does the platform become its own package**, with `holdenweb.com` as a
-
-  consumer of it? The container project has already split out this way.
-
-
+| Discovery | entry point `[project.entry-points."holdenweb.apps"]` | import name listed in `apps` |
+| What is discovered | a bare `Blueprint` | `site_app: SiteApp` |
+| Mount point | the site decides at registration | declared by the app as `url_prefix` |
+| Base template | ships its own fallback `hwpdf/base.html` | app extends `base.html`; podpack supplies the fallback |
+| Registration hook | `blueprint.record_once` | `SiteApp.init` |
+| Nav, models, data, per-app dirs | none | supported by the registry |
+
+Where they already agree, and it is worth keeping: **both namespace templates
+under the app's own name, and both rely on Flask searching the application's
+templates before any blueprint's so the site can override by shadowing.**
+
+### The recommended reconciliation
+
+Add a `site_app` to `hwpdf` alongside the existing `pdf_blueprint` export, and
+list `hwpdf` in the site's `apps`. The two can coexist: the entry point stays
+useful for registering the blueprint into a plain Flask app with no framework at
+all, which is a genuine virtue of how it was built and should not be thrown
+away. Its `hwpdf/base.html` fallback also keeps working — it simply becomes
+redundant once a site supplies chrome.
+
+Growing entry-point discovery in podpack — the hybrid the earlier draft
+described, entry points for discovery and the config list for ordering and
+enablement — is the alternative. It is more work and should wait until there are
+enough apps for the list to feel like a chore.
 
 ---
 
+## 6. `holdenweb.com`: not yet adapted
 
+Untouched by this work. Flask, Python ≥3.12, `src/` layout, `uv_build`, alembic
+baseline migration already committed (`ddec9f8`).
+`src/holdenweb/__init__.py` is still factory + models + views in one 319-line
+file, with a hardcoded `SECTIONS` list and blueprints registered by hand.
 
-## 5. Working preferences observed
+Adapting it means becoming a podpack site: `create_app(site_package="holdenweb")`,
+its `SECTIONS` becoming nav contributed by apps, its templates staying as the
+site layer that overrides everything below.
 
+### Guardrails still outstanding from the original brief
 
+- **The largest part of the adaptation is configuration.** holdenweb.com reads
+  *everything* from the environment; podpack expects non-secret settings in a
+  host-mounted TOML and secrets in the environment.
+- **`HTTPContentSource` should be mothballed** until there is a specific need —
+  Steve chose deletion. **But `/asset/` and `rewrite_asset_urls` must stay.**
+  They are not HTTP-specific, and `data/html-pages/writing/images/` holds 12
+  images that three pages reference relatively; deleting the route 404s them.
+- **`uwsgi.ini` is hardwired to Opalstack paths**
+  (`/home/sholden/apps/second-alma/`). Those should be relative to a
+  configuration parameter — perhaps an application name — that a `deploy`
+  utility helps establish, so sites can be deployed as Opalstack apps on demand.
+- **Is content core or a plugin?** Still open. Easier to answer once `hwpdf` is
+  installed and there are two apps to compare.
 
-Derived from the 2026-08-04/05 sessions; correct me if any of it is wrong.
+---
 
+## 7. What's next
 
+1. **Reconcile `hwpdf` with the registry** (§5). It is the real test of
+   out-of-repo discovery; `podpack_notes` only rehearses it.
+2. **Adapt `holdenweb.com`** to be a podpack site (§6), starting with config.
+3. Housekeeping: the MongoDB lab, `base_url`.
 
-- **Verify by running.** Every claim about the container labs was checked
+---
 
-  against a live stack, and that is what caught the ownership, `PGDATA` and
+## 8. Working preferences
 
-  healthcheck bugs. Do not report something as working on the strength of the
-
-  code reading alone.
-
-- **Comments explain *why*, not *what*.** The existing code does this
-
-  consistently — e.g. the note at lines 68-69 on unbound extensions, and the
-
-  `SERVER_NAME` comment at 240-241. Match that density.
-
-- **Config belongs to the host and to version control**, not to whoever last
-
-  had a superuser session — the reasoning behind read-only mounted config and
-
-  the deliberate breaking of `ALTER SYSTEM`.
-
-- **Secrets in the environment; everything else in files.** Consistently
-
-  applied across the site and both container labs.
-
+- **Verify by running.** Every claim about the container work was checked
+  against a live stack, and that is what caught the ownership, `PGDATA`,
+  healthcheck and SQLite-pooling bugs. Do not report something as working on the
+  strength of the code reading alone. Where a test asserts a framework
+  guarantee, check it fails when the mechanism is disabled — a test that cannot
+  fail is not evidence.
+- **Comments explain *why*, not *what*.** The code does this consistently — the
+  note on unbound extensions, on why `PGDATA` is a sub-directory, on why engine
+  options are not defaulted. Match that density.
+- **Config belongs to the host and to version control**, not to whoever last had
+  a superuser session — the reasoning behind read-only mounted config and the
+  deliberate breaking of `ALTER SYSTEM`.
+- **Secrets in the environment; everything else in files.**
 - **Flag concerns, then finish the job.** Prefer being told about a problem
-
   alongside completed work, rather than being asked about it first.
-
