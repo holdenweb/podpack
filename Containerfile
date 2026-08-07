@@ -76,6 +76,13 @@ COPY container/healthcheck.py ./healthcheck.py
 
 ENV PATH="/app/.venv/bin:${PATH}"
 
+# Which commit this image was built from, reported by /_status. It arrives as a
+# build argument because the image cannot work it out for itself: `.git` is
+# excluded from the build context, and the runtime stage has no git anyway.
+# `unknown` when built by hand rather than through scripts/up.sh.
+ARG GIT_SHA=unknown
+ENV PODPACK_BUILD_COMMIT=${GIT_SHA}
+
 # Run unprivileged. The uid/gid are fixed so the compose init-storage service
 # knows who to hand the bind-mounted host directories to.
 #

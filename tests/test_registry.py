@@ -74,6 +74,17 @@ def test_site_can_mount_an_app_where_it_likes(site):
     assert app.extensions["podpack"].apps["notes"].url_prefix == "/writing/notes"
 
 
+def test_the_import_name_is_recorded_for_reporting(app):
+    """An app's import name and its own name differ routinely, and it matters.
+
+    `apps` lists the import name; `[site.mounts]`, `[apps.<name>]` and the data
+    directories are all keyed by the app's own name. Keeping the mapping is what
+    lets `/_status` show it, so a site can look the answer up rather than
+    discover it from a boot failure.
+    """
+    assert app.extensions["podpack"].installed_from == {"notes": "podpack_notes"}
+
+
 def test_mounting_is_not_visible_to_the_app(site):
     """Where an app is mounted is the site's business, not the app's.
 

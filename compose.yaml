@@ -110,6 +110,10 @@ services:
     build:
       context: .
       dockerfile: Containerfile
+      args:
+        # Stamped into the image and reported by /_status, so "is this running
+        # my code?" has an exact answer. scripts/up.sh supplies it.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: localhost/holdenweb-lab-pg-web:latest
     restart: "no"
     env_file:
@@ -128,6 +132,10 @@ services:
     build:
       context: .
       dockerfile: Containerfile
+      args:
+        # Stamped into the image and reported by /_status, so "is this running
+        # my code?" has an exact answer. scripts/up.sh supplies it.
+        GIT_SHA: ${GIT_SHA:-unknown}
     image: localhost/holdenweb-lab-pg-web:latest
     restart: unless-stopped
     env_file:

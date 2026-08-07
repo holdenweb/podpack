@@ -49,6 +49,12 @@ def status():
     return jsonify(
         site=state.host_config["site"],
         config_source=os.environ.get("PODPACK_CONFIG", "(default)"),
+        # Baked in at build time. The question this answers is "is the container
+        # running the code I am looking at?", which a timestamp only approximates
+        # -- editing framework source needs a rebuild, not a restart, and the
+        # symptom of forgetting is a site that behaves like the previous commit.
+        # A `-dirty` suffix means the image was built from an uncommitted tree.
+        build_commit=os.environ.get("PODPACK_BUILD_COMMIT", "unknown"),
         database=row[0],
         database_user=row[1],
         database_schema=row[2],
@@ -56,6 +62,10 @@ def status():
         log_root=str(state.log_root),
         apps={
             name: {
+                # The import name in `apps`, which is not always the app's own
+                # name -- and it is the app's name that keys `[site.mounts]`,
+                # `[apps.<name>]` and the directories below.
+                "installed_from": state.installed_from.get(name),
                 "url_prefix": site_app.url_prefix,
                 "data_dir": str(state.data_root / name),
                 "data_dir_writable": os.access(state.data_root / name, os.W_OK),

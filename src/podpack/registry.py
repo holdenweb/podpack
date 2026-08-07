@@ -88,6 +88,17 @@ class PodpackState:
     apps: dict[str, SiteApp] = field(default_factory=dict)
     nav: list[Section] = field(default_factory=list)
 
+    installed_from: dict[str, str] = field(default_factory=dict)
+    """App name to the import name it was installed from.
+
+    The two are routinely different -- `podpack_notes` is imported and answers
+    to `notes` -- because a distribution wants a namespaced name while an app
+    wants a short one to put in URLs, template paths and directories. Keeping
+    the mapping lets `/_status` report it, so which name a site should key
+    `[site.mounts]` and `[apps.<name>]` on is answerable by looking rather than
+    by getting it wrong first.
+    """
+
 
 def install_apps(app: Flask, names) -> None:
     """Install each named app into `app`, in the order given.
@@ -100,6 +111,7 @@ def install_apps(app: Flask, names) -> None:
     for name in names:
         site_app = _install(app, state, name)
         state.apps[site_app.name] = site_app
+        state.installed_from[site_app.name] = name
     _check_mounts(state)
 
 

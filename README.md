@@ -47,9 +47,14 @@ Then visit <http://localhost:8458/>, or ask the site where it keeps its state:
 curl -s localhost:8458/_status | python3 -m json.tool
 ```
 
-That route reports the config file it read, every installed app with its data
-and log directories and whether they are writable, and which database, role and
-schema it is actually connected as. If a mount or a grant is wrong, it says so.
+That route reports the config file it read, the commit the image was built from,
+every installed app with the import name it came from and its data and log
+directories, and which database, role and schema it is actually connected as. If
+a mount or a grant is wrong, it says so.
+
+The import name is worth having in front of you, because it is routinely *not*
+the app's own name — `podpack_notes` is what `apps` lists, and `notes` is what
+keys `[site.mounts]`, `[apps.<name>]` and the directories on disk.
 
 Shut down with `podman compose down`, and come back with `podman compose up -d`
 — not `start`; see [Stopping and starting](#stopping-and-starting). Host storage
@@ -378,7 +383,19 @@ Do not create `pgdata` yourself; `prepare-host-dirs.sh` deliberately does not.
 
 ## Changing things
 
-Three loops, depending on what you touched:
+**When in doubt, rebuild.** `src/` is baked into the image, so editing framework
+code and then reaching for `restart` brings back the *previous* build and leaves
+the site behaving like the last commit — a confusing symptom with an unrelated
+cause. Rebuilding unconditionally costs about six seconds when nothing has
+changed, because layers are content-addressed and an untouched file invalidates
+nothing:
+
+```bash
+./scripts/up.sh          # always rebuilds, and stamps the commit into the image
+```
+
+That is the safe default. The narrower loops are worth knowing because they are
+faster and because they are what a real host does:
 
 ```bash
 podman compose restart web       # after editing config/app.toml
@@ -387,16 +404,29 @@ podman compose restart postgres  # after editing config/postgresql.conf
 # after editing config/pg_hba.conf only -- no restart needed.
 # `-u postgres` is required: pg_ctl refuses to run as root.
 podman compose exec -u postgres postgres pg_ctl reload
-```
 
-```bash
-podman compose up -d              # after editing .env (recreates containers)
-podman compose up -d --build      # after editing src/ or the Containerfile
+podman compose up -d             # after editing .env (recreates containers)
 ```
 
 Editing a mounted config file needs no rebuild and no image change, which is
 exactly the behaviour you want on a real host. `pg_hba.conf` is the one that can
-be applied without even a restart.
+be applied without even a restart. Anything under `src/`, `alembic/` or the
+`Containerfile` needs a build.
+
+### Which commit is actually running
+
+`scripts/up.sh` stamps the commit into the image, and `/_status` reports it:
+
+```console
+$ curl -s localhost:8458/_status | python3 -c 'import json,sys; print(json.load(sys.stdin)["build_commit"])'
+a7cf297-dirty
+```
+
+Compare it with `git rev-parse --short HEAD` and the question "is the container
+running the code I am looking at?" has an exact answer rather than an inference
+from timestamps. A `-dirty` suffix means the image was built from an uncommitted
+tree, which is normal while working and worth noticing when it is not. Building
+by hand instead reports `unknown`.
 
 ### Stopping and starting
 

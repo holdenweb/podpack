@@ -215,7 +215,14 @@ site came up.
     on shipping bytecode compiled on the laptop — including valid `.pyc` for
     migrations deleted long ago, which are loaded in preference to compiling the
     source actually present. Verify an ignore file by building and looking.
-14. **Revisions are generated on the host, never in the container.**
+14. **Framework source is baked into the image, so `restart` is not a rebuild.**
+    Editing anything under `src/` and then restarting brings back the *previous*
+    build: the site behaves like the last commit and nothing says why. Use
+    `./scripts/up.sh`, which always rebuilds — about six seconds when nothing
+    changed, since layers are content-addressed — and stamps the commit into the
+    image, where `/_status` reports it as `build_commit`. Only mounted config
+    (`config/*.toml`, `*.conf`) is a restart-only change.
+15. **Revisions are generated on the host, never in the container.**
     `/app/alembic/versions` is root-owned while the image runs as uid 10001, so
     `alembic revision --autogenerate` there does the whole comparison and dies
     on the final write; and `--rm` would discard the file anyway. Code being
