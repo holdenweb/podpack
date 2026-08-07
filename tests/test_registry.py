@@ -53,7 +53,16 @@ def test_site_can_mount_an_app_where_it_likes(site):
     site's address space is still the site's to choose. Without this, adding an
     app would mean accepting whatever URL its author happened to pick.
     """
-    app = site(host_config={"apps": {"notes": {"url_prefix": "/writing/notes"}}})
+    app = site(
+        host_config={
+            "site": {
+                "name": "test site",
+                "environment": "test",
+                "apps": ["podpack_notes"],
+                "mounts": {"notes": "/writing/notes"},
+            }
+        }
+    )
     client = app.test_client()
 
     assert client.get("/writing/notes/").status_code == 200
@@ -63,6 +72,56 @@ def test_site_can_mount_an_app_where_it_likes(site):
     assert 'href="/writing/notes/"' in client.get("/").get_data(as_text=True)
     # And what /_status reports is where the app actually ended up.
     assert app.extensions["podpack"].apps["notes"].url_prefix == "/writing/notes"
+
+
+def test_mounting_is_not_visible_to_the_app(site):
+    """Where an app is mounted is the site's business, not the app's.
+
+    The two used to share `[apps.<name>]`, so `app_config()` handed the app the
+    site's `url_prefix` alongside its own settings -- a decision it has no part
+    in, presented as though it were one of its own.
+    """
+    app = site(
+        host_config={
+            "site": {
+                "name": "test site",
+                "environment": "test",
+                "apps": ["podpack_notes"],
+                "mounts": {"notes": "/writing/notes"},
+            }
+        }
+    )
+    with app.test_request_context("/writing/notes/"):
+        assert app_config() == {"page_size": 5}
+
+
+def test_mounting_an_app_that_is_not_installed_is_a_boot_failure(site):
+    """The one thing a separate table costs: it can drift from the app list.
+
+    Silently ignoring the stray entry would leave the app at the address it
+    asked for -- exactly the address the site said it did not want.
+    """
+    with pytest.raises(RuntimeError, match="no installed app answers to"):
+        site(
+            host_config={
+                "site": {
+                    "name": "x",
+                    "environment": "test",
+                    "apps": ["podpack_notes"],
+                    "mounts": {"notez": "/typo"},
+                }
+            }
+        )
+
+
+def test_the_old_spelling_is_rejected_rather_than_ignored(site):
+    """`url_prefix` in the app's own table used to be how this was configured.
+
+    Quietly ignoring it would downgrade a site that had not been updated, with
+    no indication that its chosen address had stopped taking effect.
+    """
+    with pytest.raises(RuntimeError, match=r"\[site.mounts\]"):
+        site(host_config={"apps": {"notes": {"url_prefix": "/writing/notes"}}})
 
 
 def test_nav_naming_an_unknown_endpoint_is_a_boot_failure(site, monkeypatch):

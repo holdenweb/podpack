@@ -245,7 +245,7 @@ export, with the entry point kept.
 | --- | --- | --- |
 | Discovery | entry point `[project.entry-points."holdenweb.apps"]` | import name `pp_pdf` listed in `apps` |
 | What is discovered | a bare `Blueprint` | `site_app: SiteApp` |
-| Mount point | the host's argument to `register_blueprint` | `[apps.pp_pdf] url_prefix`, defaulting to the app's own |
+| Mount point | the host's argument to `register_blueprint` | `[site.mounts] pp_pdf`, defaulting to the app's own |
 | Base template | its own `pp_pdf/standalone.html` | the site's `base.html` |
 | Registration hook | `blueprint.record_once` | `SiteApp.init` |
 | Nav, models, data, per-app dirs | none | supported by the registry |
@@ -262,9 +262,12 @@ Two things changed on **this** side to meet it:
   endpoint no view provides is now a boot failure, because a bad one breaks the
   chrome on every page rather than 404ing on one.
 - `SiteApp.url_prefix` became a request rather than a claim: a site overrules it
-  with `url_prefix` in the app's own config section. The app list decides
-  *whether* a feature is installed; the shape of the address space stays the
-  site's.
+  in `[site.mounts]`, keyed by app name. The app list decides *whether* a feature
+  is installed; the shape of the address space stays the site's. It sits under
+  `[site]` because it is site policy, not app configuration — while it lived in
+  `[apps.<name>]`, `app_config()` handed the app a decision it has no part in.
+  A mount naming an app that is not installed is a boot failure, since a table
+  of its own is a table that can drift from the app list.
 
 Where the two contracts already agreed, and it was worth keeping: **both
 namespace templates under the app's own name, and both rely on Flask searching

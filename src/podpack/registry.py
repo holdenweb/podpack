@@ -100,6 +100,7 @@ def install_apps(app: Flask, names) -> None:
     for name in names:
         site_app = _install(app, state, name)
         state.apps[site_app.name] = site_app
+    _check_mounts(state)
 
 
 def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
@@ -136,14 +137,55 @@ def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
     # space: the site may put it somewhere else entirely. `replace` rather than
     # a local variable so that what goes into `state.apps` -- and so what
     # /_status reports -- is where the app actually ended up.
-    settings = state.host_config.get("apps", {}).get(site_app.name, {})
-    if "url_prefix" in settings:
-        site_app = replace(site_app, url_prefix=settings["url_prefix"])
+    _reject_mount_in_app_config(state, site_app.name)
+    mounts = state.host_config.get("site", {}).get("mounts", {})
+    if site_app.name in mounts:
+        site_app = replace(site_app, url_prefix=mounts[site_app.name])
 
     app.register_blueprint(site_app.blueprint, url_prefix=site_app.url_prefix)
     _check_nav(app, site_app)
     state.nav.extend(site_app.nav)
     return site_app
+
+
+def _check_mounts(state) -> None:
+    """Refuse to boot on a mount for an app that is not installed.
+
+    Keeping mounts in their own table costs one thing that keeping them inside
+    `[apps.<name>]` did not: the two can drift. A typo, or an app dropped from
+    `apps` while its mount stayed behind, would otherwise be silent -- and the
+    app would come up at the address it asked for, which is precisely the
+    address the site said it did not want. Checked after installation because
+    that is the first moment the app names are known.
+    """
+    mounts = state.host_config.get("site", {}).get("mounts", {})
+    unknown = set(mounts) - set(state.apps)
+    if unknown:
+        installed = ", ".join(sorted(state.apps)) or "(none)"
+        raise RuntimeError(
+            f"[site.mounts] mounts {', '.join(sorted(unknown))}, which no "
+            f"installed app answers to. Installed apps: {installed}. Note the "
+            "key is the app's name -- that is, its blueprint's name -- which is "
+            "not always the import name listed in `apps`."
+        )
+
+
+def _reject_mount_in_app_config(state, name: str) -> None:
+    """Refuse to boot on the old spelling rather than quietly ignoring it.
+
+    Mounting used to be configured with `url_prefix` in the app's own
+    `[apps.<name>]` table. Moving it to `[site.mounts]` would otherwise be a
+    silent downgrade for any site still using the old form: the app would come
+    up at the address it asked for rather than the one the site chose, with
+    nothing said. Failing here costs one edit and names it exactly.
+    """
+    if "url_prefix" in state.host_config.get("apps", {}).get(name, {}):
+        raise RuntimeError(
+            f"[apps.{name}] sets url_prefix, which podpack no longer reads. "
+            f"Mount points belong to the site, so move it to:\n\n"
+            f"    [site.mounts]\n    {name} = \"…\"\n\n"
+            f"`[apps.{name}]` is for settings the app itself reads."
+        )
 
 
 def _check_nav(app: Flask, site_app: SiteApp) -> None:

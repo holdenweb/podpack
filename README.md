@@ -139,12 +139,28 @@ returned an empty dict, with nothing raised at boot or in the request.
 
 The app list decides *whether* a feature is installed. The shape of the address
 space stays the site's, so `url_prefix` is a request rather than a claim, and a
-site overrules it in the app's own config section:
+site overrules it in a table of its own:
 
 ```toml
-[apps.myapp]
-url_prefix = "/tools/myapp"
+[site.mounts]
+myapp = "/tools/myapp"
 ```
+
+It lives under `[site]` rather than in `[apps.myapp]` because it is **site policy
+and not app configuration**: the app takes no part in the decision, and so never
+sees it — `app_config()` returns only what the app itself is meant to read. Two
+consequences worth knowing:
+
+- **The key is the app's name, which is its blueprint's name**, and that is not
+  always the import name in `apps`. `podpack_notes` is imported; it answers to
+  `notes`.
+- **Naming an app that is not installed is a boot failure.** Keeping mounts in
+  their own table means the two can drift, and a stray entry would otherwise be
+  silent — leaving the app at the address it asked for, which is exactly the
+  address the site said it did not want.
+
+Only apps being moved need an entry, so the table doubles as the site's map of
+everywhere it has chosen to put something.
 
 Nothing else needs saying — not by the app, and not by the site. **A `Section`
 names an endpoint, not a path**, so the navigation resolves through `url_for`

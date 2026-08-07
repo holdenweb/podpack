@@ -14,6 +14,19 @@ base_url = "http://localhost:8458"
 # entries appear in it, and an app's init may rely on an earlier app's service.
 apps = ["podpack_notes"]
 
+# Where the site chooses to mount an app, overruling the `url_prefix` the app
+# asks for. Only apps being moved need an entry. Site policy rather than app
+# configuration, which is why it lives here and not in `[apps.<name>]` -- an app
+# has no part in the decision and never sees it.
+#
+# The key is the app's *name*, which is its blueprint's name, and that is not
+# always the import name above: `podpack_notes` is imported, and answers to
+# `notes`. Naming an app that is not installed is a boot failure rather than a
+# line that quietly does nothing.
+#
+# [site.mounts]
+# notes = "/writing/notes"
+
 [database]
 # Passed straight to SQLAlchemy's engine. The URI itself is a secret (it
 # carries the password) and so lives in the environment, not here. Only the
