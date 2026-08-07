@@ -13,6 +13,16 @@ ENV PYTHONUNBUFFERED=1 \
 # build has one fewer network fetch to go wrong and one fewer version to drift.
 COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /usr/local/bin/uv
 
+# uv shells out to a real `git` to fetch a dependency locked to a git source,
+# and the slim base has none. An app installed straight from its repository --
+# the ordinary case for one not published to an index -- therefore fails the
+# build with "Git executable not found" rather than anything about the app.
+# Its own layer, before the lockfile is copied, so that adding an app does not
+# also reinstall git.
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Dependencies first, in their own layer keyed on the lockfile, so that editing
