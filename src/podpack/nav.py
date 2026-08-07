@@ -14,11 +14,21 @@ from flask import current_app
 
 @dataclass(frozen=True)
 class Section:
-    """One navigation entry. Frozen because apps declare these at import time
-    and nothing should be able to rewrite another app's nav after the fact."""
+    """One navigation entry.
+
+    `endpoint` is a Flask endpoint name -- `"notes.index"` -- and not a URL. The
+    chrome resolves it with `url_for` as it renders, which buys two things a
+    literal path cannot. An entry follows its app when a site mounts that app
+    somewhere other than where the app asked to be; and it cannot drift quietly
+    out of step with the app's own routes, because an endpoint no view provides
+    is a boot failure rather than a link that 404s when somebody clicks it.
+
+    Frozen because apps declare these at import time and nothing should be able
+    to rewrite another app's nav after the fact.
+    """
 
     label: str
-    path: str
+    endpoint: str
 
 
 def sections():

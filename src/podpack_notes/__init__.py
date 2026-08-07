@@ -13,5 +13,5 @@ site_app = SiteApp(
     name="notes",
     blueprint=blueprint,
     url_prefix="/notes",
-    nav=(Section("Notes", "/notes/"),),
+    nav=(Section("Notes", "notes.index"),),
 )

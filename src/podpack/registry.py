@@ -15,7 +15,7 @@ An app is a package exposing a single module-level `site_app`:
         name="notes",
         blueprint=blueprint,
         url_prefix="/notes",
-        nav=(Section("Notes", "/notes/"),),
+        nav=(Section("Notes", "notes.index"),),
     )
 
 Everything else is convention: `models.py` if it has models, `templates/<name>/`
@@ -23,7 +23,7 @@ if it has templates, `data/` if it ships data.
 """
 
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from importlib import import_module
 from importlib.resources import as_file, files
 from importlib.util import find_spec
@@ -47,6 +47,12 @@ class SiteApp:
 
     blueprint: Blueprint
     url_prefix: str | None = None
+    """Where the app asks to be mounted, and only asks: a site that wants it
+    elsewhere in its address space says so with `url_prefix` in the app's own
+    config section, and the registry mounts it there instead. `None` mounts at
+    the site root. Nav entries need no adjustment either way, because they name
+    endpoints rather than paths."""
+
     nav: tuple[Section, ...] = ()
 
     init: Callable[[Flask], None] | None = None
@@ -113,9 +119,37 @@ def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
     if site_app.init is not None:
         site_app.init(app)
 
+    # An app's `url_prefix` is a request, not a claim on the site's address
+    # space: the site may put it somewhere else entirely. `replace` rather than
+    # a local variable so that what goes into `state.apps` -- and so what
+    # /_status reports -- is where the app actually ended up.
+    settings = state.host_config.get("apps", {}).get(site_app.name, {})
+    if "url_prefix" in settings:
+        site_app = replace(site_app, url_prefix=settings["url_prefix"])
+
     app.register_blueprint(site_app.blueprint, url_prefix=site_app.url_prefix)
+    _check_nav(app, site_app)
     state.nav.extend(site_app.nav)
     return site_app
+
+
+def _check_nav(app: Flask, site_app: SiteApp) -> None:
+    """Refuse to boot if a nav entry names an endpoint no view provides.
+
+    The chrome resolves these with `url_for` as it renders, so one bad entry
+    raises BuildError on *every* page of the site rather than 404ing on the one
+    page it points at. A boot failure naming the app is a great deal easier to
+    act on, and it is checked here because this is the first moment the app's
+    routes exist.
+    """
+    for section in site_app.nav:
+        if section.endpoint not in app.view_functions:
+            raise RuntimeError(
+                f"{site_app.name} contributes the nav entry {section.label!r} "
+                f"naming the endpoint {section.endpoint!r}, which no view "
+                "provides; nav entries name endpoints rather than paths so "
+                "that they follow the app wherever the site mounts it"
+            )
 
 
 def import_app_models(names) -> None:

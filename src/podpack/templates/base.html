@@ -30,7 +30,7 @@
       <nav>
         <ul>
           {% for section in sections %}
-          <li><a href="{{ section.path }}">{{ section.label }}</a></li>
+          <li><a href="{{ url_for(section.endpoint) }}">{{ section.label }}</a></li>
           {% endfor %}
         </ul>
       </nav>

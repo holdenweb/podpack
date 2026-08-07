@@ -5,6 +5,8 @@ not, so a failure here means the plugin mechanism has stopped being a plugin
 mechanism.
 """
 
+from dataclasses import replace
+
 import pytest
 
 from podpack import Section, SiteApp, create_app, db
@@ -31,9 +33,51 @@ def test_models_reach_metadata(app):
 
 
 def test_nav_is_contributed_by_apps(app, client):
-    assert app.extensions["podpack"].nav == [Section("Notes", "/notes/")]
+    assert app.extensions["podpack"].nav == [Section("Notes", "notes.index")]
     body = client.get("/").get_data(as_text=True)
-    assert 'href="/notes/"' in body
+    # Twice over: the header nav in base.html, and the installed-apps list in
+    # index.html. Both are checked because an empty href is what a template
+    # reading the wrong attribute off a Section produces -- Jinja renders an
+    # Undefined as "" and says nothing -- so a link that silently goes nowhere
+    # is the failure this pair is here to catch.
+    assert body.count('href="/notes/"') == 2
+    assert 'href=""' not in body
+
+
+def test_site_can_mount_an_app_where_it_likes(site):
+    """An app's `url_prefix` is what it asks for, not what it gets.
+
+    The app list decides *whether* a feature is installed; the shape of the
+    site's address space is still the site's to choose. Without this, adding an
+    app would mean accepting whatever URL its author happened to pick.
+    """
+    app = site(host_config={"apps": {"notes": {"url_prefix": "/writing/notes"}}})
+    client = app.test_client()
+
+    assert client.get("/writing/notes/").status_code == 200
+    assert client.get("/notes/").status_code == 404
+    # The nav follows without the app or the site restating anything, which is
+    # the whole reason a Section holds an endpoint rather than a path.
+    assert 'href="/writing/notes/"' in client.get("/").get_data(as_text=True)
+    # And what /_status reports is where the app actually ended up.
+    assert app.extensions["podpack"].apps["notes"].url_prefix == "/writing/notes"
+
+
+def test_nav_naming_an_unknown_endpoint_is_a_boot_failure(site, monkeypatch):
+    """Better than a link that only fails when somebody clicks it.
+
+    A bad nav endpoint breaks `url_for` in the chrome, so it would take out
+    every page on the site rather than the one it points at.
+    """
+    import podpack_notes
+
+    monkeypatch.setattr(
+        podpack_notes,
+        "site_app",
+        replace(podpack_notes.site_app, nav=(Section("Notes", "notes.nope"),)),
+    )
+    with pytest.raises(RuntimeError, match="notes.nope"):
+        site()
 
 
 def test_app_template_is_namespaced_and_used(client):

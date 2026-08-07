@@ -189,40 +189,49 @@ site came up.
 
 ---
 
-## 5. `hwpdf`: the first external plugin, and a contract mismatch
+## 5. `pp-pdf`: the first external plugin — reconciled
 
-`~/sites/hwpdf` extracts the PDF booklet and page-splitting tools into a
-standalone installable package. It is well-formed and tested — but it was built
-against the *speculative* discovery design in the earlier draft of this brief,
-not against the registry that actually got built. **The two do not currently fit
-together.** This is the most important thing on this page.
+`~/sites/pp-pdf` (formerly `~/sites/hwpdf`) holds the PDF booklet and
+page-splitting tools. It was built against the *speculative* discovery design in
+an earlier draft of this brief rather than the registry that actually got built,
+so the two did not fit together. They now do, along the lines this section
+originally recommended: a `site_app` alongside the existing `pdf_blueprint`
+export, with the entry point kept.
 
-| | `hwpdf` today | podpack expects |
+| | `pp-pdf` as a plain blueprint | `pp-pdf` under podpack |
 | --- | --- | --- |
-| Discovery | entry point `[project.entry-points."holdenweb.apps"]` | import name listed in `apps` |
+| Discovery | entry point `[project.entry-points."holdenweb.apps"]` | import name `pp_pdf` listed in `apps` |
 | What is discovered | a bare `Blueprint` | `site_app: SiteApp` |
-| Mount point | the site decides at registration | declared by the app as `url_prefix` |
-| Base template | ships its own fallback `hwpdf/base.html` | app extends `base.html`; podpack supplies the fallback |
+| Mount point | the host's argument to `register_blueprint` | `[apps.pp_pdf] url_prefix`, defaulting to the app's own |
+| Base template | its own `pp_pdf/standalone.html` | the site's `base.html` |
 | Registration hook | `blueprint.record_once` | `SiteApp.init` |
 | Nav, models, data, per-app dirs | none | supported by the registry |
 
-Where they already agree, and it is worth keeping: **both namespace templates
-under the app's own name, and both rely on Flask searching the application's
-templates before any blueprint's so the site can override by shadowing.**
+Both halves work and are tested independently; podpack is an optional import in
+that package, guarded with `find_spec`, so it stays usable by a site that has
+never heard of this framework. That is a genuine virtue of how it was built and
+was deliberately not thrown away.
 
-### The recommended reconciliation
+Two things changed on **this** side to meet it:
 
-Add a `site_app` to `hwpdf` alongside the existing `pdf_blueprint` export, and
-list `hwpdf` in the site's `apps`. The two can coexist: the entry point stays
-useful for registering the blueprint into a plain Flask app with no framework at
-all, which is a genuine virtue of how it was built and should not be thrown
-away. Its `hwpdf/base.html` fallback also keeps working — it simply becomes
-redundant once a site supplies chrome.
+- `Section` holds an **endpoint name**, not a path, so nav resolves through
+  `url_for` and follows an app wherever it is mounted. An entry naming an
+  endpoint no view provides is now a boot failure, because a bad one breaks the
+  chrome on every page rather than 404ing on one.
+- `SiteApp.url_prefix` became a request rather than a claim: a site overrules it
+  with `url_prefix` in the app's own config section. The app list decides
+  *whether* a feature is installed; the shape of the address space stays the
+  site's.
+
+Where the two contracts already agreed, and it was worth keeping: **both
+namespace templates under the app's own name, and both rely on Flask searching
+the application's templates before any blueprint's so the site can override by
+shadowing.**
 
 Growing entry-point discovery in podpack — the hybrid the earlier draft
 described, entry points for discovery and the config list for ordering and
-enablement — is the alternative. It is more work and should wait until there are
-enough apps for the list to feel like a chore.
+enablement — remains the alternative to the config list. It is more work and
+should wait until there are enough apps for the list to feel like a chore.
 
 ---
 

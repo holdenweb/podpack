@@ -70,7 +70,7 @@ site_app = SiteApp(
     name="myapp",
     blueprint=blueprint,
     url_prefix="/myapp",
-    nav=(Section("My App", "/myapp/"),),
+    nav=(Section("My App", "myapp.index"),),
 )
 ```
 
@@ -78,13 +78,31 @@ site_app = SiteApp(
 | --- | --- |
 | `name` | Identifies the app everywhere: blueprint name, template namespace, data and log directory. One name, so knowing an app is installed tells you where all its parts are. |
 | `blueprint` | An ordinary Flask `Blueprint`. Give it `template_folder="templates"` if it has templates. |
-| `url_prefix` | Where its routes are mounted. `None` mounts at the site root. |
-| `nav` | `Section` entries contributed to the site's navigation, in installation order. |
+| `url_prefix` | Where the app *asks* to be mounted. `None` means the site root, and the site can overrule it — see below. |
+| `nav` | `Section(label, endpoint)` entries contributed to the site's navigation, in installation order. |
 | `init` | Optional `callable(app)`, run before the blueprint is registered, for config keys and services. |
 
 Install it by adding its **import name** to `apps` in the site's config file.
 Apps are installed in the order listed: nav entries appear in that order, and an
 app's `init` may rely on a service an earlier one registered.
+
+### Where an app lands is the site's decision
+
+The app list decides *whether* a feature is installed. The shape of the address
+space stays the site's, so `url_prefix` is a request rather than a claim, and a
+site overrules it in the app's own config section:
+
+```toml
+[apps.myapp]
+url_prefix = "/tools/myapp"
+```
+
+Nothing else needs saying — not by the app, and not by the site. **A `Section`
+names an endpoint, not a path**, so the navigation resolves through `url_for`
+as the chrome renders and follows the app wherever it ends up. That is also why
+an entry naming an endpoint no view provides is a boot failure: a bad one would
+break `url_for` in the chrome and take out every page on the site, not just the
+page it points at, so it is worth refusing to start over.
 
 ## Templates
 
