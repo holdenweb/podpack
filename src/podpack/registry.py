@@ -9,17 +9,17 @@ this module adds, and the whole of it.
 An app is a package exposing a single module-level `site_app`:
 
     from podpack import Section, SiteApp
-    from .views import blueprint
+    from .views import blueprint      # Blueprint("notes", __name__, ...)
 
     site_app = SiteApp(
-        name="notes",
         blueprint=blueprint,
         url_prefix="/notes",
         nav=(Section("Notes", "notes.index"),),
     )
 
-Everything else is convention: `models.py` if it has models, `templates/<name>/`
-if it has templates, `data/` if it ships data.
+The app's name is its blueprint's name; see `SiteApp.name`. Everything else is
+convention: `models.py` if it has models, `templates/<name>/` if it has
+templates, `data/` if it ships data.
 """
 
 import shutil
@@ -40,11 +40,6 @@ from .paths import attach_file_logging, prepare
 class SiteApp:
     """An installable unit of site functionality."""
 
-    name: str
-    """Identifies the app everywhere it needs identifying: its blueprint name,
-    its template namespace, and its data and log directories. One name, so that
-    knowing an app is installed tells you where all of its parts are."""
-
     blueprint: Blueprint
     url_prefix: str | None = None
     """Where the app asks to be mounted, and only asks: a site that wants it
@@ -59,6 +54,23 @@ class SiteApp:
     """Called before the blueprint is registered, for config keys and services
     the app needs. The site's own config is already loaded by this point, so an
     app can read its section of the host config file here."""
+
+    @property
+    def name(self) -> str:
+        """Identifies the app everywhere it needs identifying: its template
+        namespace, its data and log directories, and its section of the site's
+        config file.
+
+        Derived rather than declared, because a declared copy could only drift.
+        The blueprint's name is already this app's public identity -- it
+        prefixes every endpoint, and so appears in every `url_for` and every nav
+        entry -- and it is what podpack resolves an app from at runtime, through
+        `request.blueprint`. When these were two fields that had to agree,
+        nothing detected them disagreeing: the registry would create one
+        directory and read one config section while the views used another, with
+        no error at boot or in the request.
+        """
+        return self.blueprint.name
 
 
 @dataclass
@@ -100,8 +112,9 @@ def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
         )
     if site_app.name in state.apps:
         raise RuntimeError(
-            f"two installed apps both call themselves {site_app.name!r}; names "
-            "must be unique because they decide template and directory names"
+            f"two installed apps share the blueprint name {site_app.name!r}; it "
+            "has to be unique because it decides the template namespace, the "
+            "data and log directories, and the config section"
         )
 
     # Importing the models module *is* model registration: defining a db.Model

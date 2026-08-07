@@ -8,8 +8,10 @@ mechanism.
 from dataclasses import replace
 
 import pytest
+from flask import Blueprint
 
-from podpack import Section, SiteApp, create_app, db
+from podpack import Section, SiteApp, app_config, create_app, db
+from podpack.paths import data_dir
 
 
 def test_app_list_is_configuration_not_code(site):
@@ -151,6 +153,32 @@ def test_app_config_is_namespaced(client, app):
     with app.test_request_context("/notes/"):
         assert app_config().get("page_size") == 5
         assert app_config("notes") == {"page_size": 5}
+
+
+def test_app_name_is_its_blueprint_name(app):
+    """One name, so it cannot be two names that disagree.
+
+    `data_dir()` and `app_config()` resolve the app from `request.blueprint`,
+    while the registry creates directories and reads config from
+    `site_app.name`. When those were separate fields, a mismatch made the
+    registry prepare one directory and the views use another, and left
+    `app_config()` returning an empty dict -- with nothing raised at boot or in
+    the request. Deriving the name is what makes that unrepresentable.
+    """
+    from podpack_notes import site_app
+
+    assert site_app.name == site_app.blueprint.name == "notes"
+
+    state = app.extensions["podpack"]
+    with app.test_request_context("/notes/"):
+        assert data_dir() == state.data_root / "notes"
+        assert app_config() == {"page_size": 5}
+
+
+def test_site_app_takes_no_name_of_its_own(site):
+    """Declaring a name separately is now an error rather than a hazard."""
+    with pytest.raises(TypeError):
+        SiteApp(name="mismatched", blueprint=Blueprint("bp", __name__))
 
 
 def test_migration_metadata_needs_no_application(tmp_path, monkeypatch):

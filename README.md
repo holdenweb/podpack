@@ -64,10 +64,9 @@ convention.
 # myapp/__init__.py
 from podpack import Section, SiteApp
 
-from .views import blueprint
+from .views import blueprint      # Blueprint("myapp", __name__, ...)
 
 site_app = SiteApp(
-    name="myapp",
     blueprint=blueprint,
     url_prefix="/myapp",
     nav=(Section("My App", "myapp.index"),),
@@ -76,7 +75,6 @@ site_app = SiteApp(
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Identifies the app everywhere: blueprint name, template namespace, data and log directory. One name, so knowing an app is installed tells you where all its parts are. |
 | `blueprint` | An ordinary Flask `Blueprint`. Give it `template_folder="templates"` if it has templates. |
 | `url_prefix` | Where the app *asks* to be mounted. `None` means the site root, and the site can overrule it — see below. |
 | `nav` | `Section(label, endpoint)` entries contributed to the site's navigation, in installation order. |
@@ -85,6 +83,23 @@ site_app = SiteApp(
 Install it by adding its **import name** to `apps` in the site's config file.
 Apps are installed in the order listed: nav entries appear in that order, and an
 app's `init` may rely on a service an earlier one registered.
+
+### The app's name is its blueprint's name
+
+`site_app.name` is derived, not declared, and it identifies the app everywhere it
+needs identifying: **its template namespace, its data and log directories, and
+its section of the site's config file.** So name the blueprint carefully — that
+is the decision.
+
+It reads from the blueprint because that name is already the app's public
+identity: it prefixes every endpoint, and so appears in every `url_for` and every
+nav entry. It is also what podpack resolves an app from during a request, through
+`request.blueprint`.
+
+A separate `name` field would be a copy of that, and a copy can drift. When there
+were two, nothing detected them disagreeing — the registry created and chowned
+one directory while the views read and wrote another, and `app_config()` quietly
+returned an empty dict, with nothing raised at boot or in the request.
 
 ### Where an app lands is the site's decision
 

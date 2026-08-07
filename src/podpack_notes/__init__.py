@@ -10,7 +10,6 @@ from podpack import Section, SiteApp
 from .views import blueprint
 
 site_app = SiteApp(
-    name="notes",
     blueprint=blueprint,
     url_prefix="/notes",
     nav=(Section("Notes", "notes.index"),),

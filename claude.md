@@ -63,16 +63,25 @@ An app is a package exposing **one module-level `site_app`**:
 
 ```python
 from podpack import Section, SiteApp
-from .views import blueprint
+from .views import blueprint      # Blueprint("myapp", __name__, ...)
 
 site_app = SiteApp(
-    name="myapp",              # blueprint name, template namespace, data/log dir
     blueprint=blueprint,
-    url_prefix="/myapp",
-    nav=(Section("My App", "/myapp/"),),
+    url_prefix="/myapp",       # a request; the site may mount it elsewhere
+    nav=(Section("My App", "myapp.index"),),   # endpoint, not path
     init=None,                 # optional callable(app) for config and services
 )
 ```
+
+**The app's name is its blueprint's name** — `site_app.name` is derived, not
+declared. It is the template namespace, the data and log directory names, and
+the config section, so naming the blueprint is the decision that matters. It
+reads from the blueprint because that name is already the app's public identity
+(it prefixes every endpoint, and so every `url_for` and nav entry) and is what
+podpack resolves an app from at runtime via `request.blueprint`. A second
+declared copy could only drift, and when there were two, nothing detected them
+disagreeing: the registry prepared one directory while the views used another and
+`app_config()` returned `{}`, silently.
 
 Everything else is convention:
 
