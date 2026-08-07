@@ -140,6 +140,18 @@ secrets through the environment. Promotion to a real host is an edit of `.env`.
 
 `init-storage` → `postgres` (waits healthy) → `migrate` → `web`.
 
+The image builds in two stages. `git` is installed at build time — uv shells out
+to it for a dependency locked to a git source, which is how an app not published
+to an index gets installed — but neither it nor uv nor uv's cache is needed to
+run the site. Leaving all three in the builder halves the image, 398MB to 203MB.
+Nothing is locked to a git source yet, so that layer is groundwork rather than
+load-bearing; it is there so the first such app fails on nothing.
+
+Adding an app from outside the repo is therefore two operations, not one:
+`uv add` plus a rebuild puts the distribution *in the image*, and a line in
+`app.toml` plus a restart *enables* it on the site. Only the second is the
+config-and-restart the framework advertises.
+
 Verified on a clean slate: host storage deleted, cluster re-initialised,
 bootstrap re-run, and the migration creating the schema on PostgreSQL before the
 site came up.
@@ -182,11 +194,33 @@ site came up.
     StaticPool rejects `pool_size` outright, so podpack passes through only the
     keys the site actually set. Supplying defaults made it unable to run on
     SQLite at all.
-11. **Renaming the project directory breaks `.venv`.** Console-script shebangs
-    carry the absolute path, so every entry point silently fails to spawn after
-    a rename — `uv sync` will not repair it, because it audits packages rather
-    than scripts. `rm -rf .venv && uv sync --all-groups`. This bit when
-    `podman/` became `podpack/`.
+11. **A venv is tied to its absolute path, twice over.** Console-script shebangs
+    carry the interpreter path, and the project is installed into it as an
+    editable pointing at `<workdir>/src`. So a moved venv gives both
+    `gunicorn: not found` (exit 127, which reads like a PATH problem) *and*
+    `ModuleNotFoundError`. `uv sync` will not repair it, because it audits
+    packages rather than scripts. Two faces of the same trap:
+    - on the host, renaming the project directory — `rm -rf .venv && uv sync
+      --all-groups`. This bit when `podman/` became `podpack/`.
+    - in the image, the two build stages must share a `WORKDIR`. Mostly this
+      fails loudly, because `COPY --from=builder /app/.venv` cannot find its
+      source; only setting both to *different* values yields the broken image.
+12. **Do not try to delete something out of an earlier image layer.** The layer
+    that added it still carries the files and the deletion only adds another on
+    top, so the image grows. Not shipping it — a second stage — is the only way
+    to not ship it.
+13. **`.dockerignore` patterns anchor to the context root.** A bare
+    `__pycache__/` excludes nothing under `src/`; it needs `**/__pycache__`.
+    Written the wrong way the file looks right, does nothing, and the image goes
+    on shipping bytecode compiled on the laptop — including valid `.pyc` for
+    migrations deleted long ago, which are loaded in preference to compiling the
+    source actually present. Verify an ignore file by building and looking.
+14. **Revisions are generated on the host, never in the container.**
+    `/app/alembic/versions` is root-owned while the image runs as uid 10001, so
+    `alembic revision --autogenerate` there does the whole comparison and dies
+    on the final write; and `--rm` would discard the file anyway. Code being
+    read-only to the process running it is correct — applying migrations is a
+    container's job, authoring them is not.
 
 ### Still open here
 

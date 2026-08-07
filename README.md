@@ -84,6 +84,38 @@ Install it by adding its **import name** to `apps` in the site's config file.
 Apps are installed in the order listed: nav entries appear in that order, and an
 app's `init` may rely on a service an earlier one registered.
 
+### Installing an app, and enabling one
+
+These are two different operations, and only the second is free.
+
+**Enabling** an app already present in the image is a line in `app.toml` and a
+restart — no code change, no rebuild, no compose change. That is the claim this
+framework is built around.
+
+**Installing** one that is not yet in the image means putting the distribution
+there, which is a dependency change and a rebuild:
+
+```bash
+uv add "pp-pdf @ git+https://github.com/…/pp-pdf"   # records it in uv.lock
+podman compose up -d --build                        # bakes it into the image
+```
+
+...and *then* the line in `app.toml`. podpack itself is indifferent to how the
+distribution arrived — `apps = ["pp_pdf"]` is an import name, and the registry
+only does `import_module`. An index, a git repository, a direct URL and a local
+path are all the same to it.
+
+Only one of those sources asks for a *tool* the image would not otherwise have:
+**git**, because uv shells out to it. That is why the build stage installs one —
+see [The image](#the-image). A local path needs the source inside the build
+context, which a bind mount does not provide.
+
+Index and URL installs need no extra tool, but that is not the same as needing
+nothing: the builder is `python:3.12-slim` and has no C compiler, so a
+dependency that resolves to an sdist needing compilation fails there whatever
+its source. Wheels are fine; anything that has to be built is not, until a
+toolchain is added.
+
 ### The app's name is its blueprint's name
 
 `site_app.name` is derived, not declared, and it identifies the app everywhere it
@@ -219,13 +251,29 @@ One alembic history for the whole site. The metadata alembic compares against is
 built by importing the models of every app the *site configuration* says is
 installed, so migrations follow the app list.
 
-```bash
-# Generate a revision for whatever changed.
-podman compose run --rm migrate alembic revision --autogenerate -m "what changed"
+**Generating** a revision happens on the host, because the result is a file that
+belongs in the repository:
 
-# Applied automatically at startup; run by hand like this.
-podman compose run --rm migrate alembic upgrade head
+```bash
+export PODPACK_CONFIG=config/app.toml
+export SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://holdenweb_app:…@127.0.0.1:5433/holdenweb
+uv run alembic revision --autogenerate -m "what changed"
 ```
+
+**Applying** one happens in the container, automatically at startup, or by hand:
+
+```bash
+podman compose run --rm migrate alembic upgrade head
+podman compose run --rm migrate alembic current
+```
+
+Do not reach for `podman compose run --rm migrate alembic revision
+--autogenerate`. It fails, and twice over: `/app/alembic/versions` is root-owned
+while the image runs as uid 10001, so alembic does the whole comparison and then
+dies on the final write with `PermissionError`; and even given permission, the
+file would be destroyed with the `--rm` container instead of landing in the
+repository. The image's code being read-only to the process running it is the
+right arrangement — generating revisions is simply not a container's job.
 
 Because a revision's directory does not say which app it came from, its
 **message should**. See
@@ -459,6 +507,59 @@ as a **script file**, not a `python -c` one-liner: podman splits `["CMD", ...]`
 healthcheck arguments on whitespace, so an inline probe arrives mangled and dies
 with a SyntaxError — reporting the container unhealthy however well it is
 actually running.
+
+## The image
+
+[`Containerfile`](Containerfile) builds in **two stages**, because three things
+are needed to build the virtual environment and none of them to run it:
+
+| Left behind in the builder | Why it is there | Weight |
+| --- | --- | --- |
+| `git` | uv shells out to it for a dependency locked to a git source | 104 MB |
+| the `uv` binary | resolves and installs from the lockfile | 47 MB |
+| uv's download cache | populated as a side effect of `uv sync` | ~44 MB |
+
+No dependency is locked to a git source **yet**, so git is currently groundwork
+rather than load-bearing: the build would succeed without it today. It is
+installed ahead of need because the first app installed straight from a
+repository would otherwise fail the build with "Git executable not found",
+which names nothing that would lead you here.
+
+Together that is roughly half the image: **398 MB single-stage against 203 MB**.
+The runtime stage copies the finished `.venv`, the source, the migration
+environment and the healthcheck, and nothing else.
+
+Note that *removing* git in a later layer would not have worked. The layer that
+installed it still carries the files, and a deletion only adds another layer on
+top — the image gets slightly bigger, not smaller. Not shipping it is the only
+way to not ship it.
+
+### Both stages must use the same `WORKDIR`
+
+A venv is tied to its absolute path twice over. Console-script shebangs carry the
+interpreter path, and the project is installed into it as an **editable**
+pointing at `<workdir>/src` — which is also why the runtime stage copies the
+source: the venv alone is not a complete installation.
+
+So a venv built under one directory and copied to another is thoroughly broken,
+not subtly so. Built under `/build` and copied to `/app`:
+
+```console
+$ gunicorn --version
+sh: 1: gunicorn: not found          # exit 127 — reads like a PATH problem
+$ python -c "import podpack"
+ModuleNotFoundError: No module named 'podpack'
+```
+
+Neither message mentions the venv, which is what makes it worth knowing. It is
+the same trap as renaming the project directory on the host, where `uv sync`
+will not repair it either because it audits packages rather than scripts. There
+the fix is `rm -rf .venv && uv sync --all-groups`; here it is keeping the two
+`WORKDIR` lines identical.
+
+In this file a mismatch mostly fails loudly instead: `COPY --from=builder
+/app/.venv` cannot find its source and the build stops. Only changing both paths
+to *different* values produces the broken image above.
 
 ## Running on Linux
 

@@ -2,7 +2,13 @@
 # directory of source: the image then contains exactly what `uv sync --frozen`
 # resolves from the committed lockfile, which is the same thing a developer
 # gets locally and the same thing a deployment gets.
-FROM docker.io/library/python:3.12-slim
+#
+# Two stages, because three things are needed to *build* the venv and none of
+# them to run it: git, uv, and uv's download cache. Together they are half the
+# image -- 398MB single-stage against 203MB here -- so the runtime stage takes
+# the finished venv and leaves the toolchain behind.
+
+FROM docker.io/library/python:3.12-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -19,6 +25,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /usr/local/bin/uv
 # build with "Git executable not found" rather than anything about the app.
 # Its own layer, before the lockfile is copied, so that adding an app does not
 # also reinstall git.
+#
+# Note that removing it later in a single-stage build would not have helped:
+# the layer above still carries the files, and the deletion only adds another
+# layer on top. Not shipping it at all is what the second stage is for.
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends git \
  && rm -rf /var/lib/apt/lists/*
@@ -33,6 +43,25 @@ RUN uv sync --frozen --no-install-project --no-dev
 COPY src/ ./src/
 COPY README.md ./
 RUN uv sync --frozen --no-dev
+
+
+FROM docker.io/library/python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# The same WORKDIR as the builder, and not by coincidence. The venv's
+# console-script shebangs carry an absolute interpreter path, so a venv built
+# under one directory and copied to another leaves every entry point -- gunicorn,
+# alembic -- failing to spawn with a bare "no such file or directory". It is the
+# same trap as renaming the project directory on the host.
+WORKDIR /app
+
+COPY --from=builder /app/.venv ./.venv
+
+# The project is installed into that venv as an editable pointing at ./src, so
+# the source has to come too -- the venv alone is not a complete installation.
+COPY src/ ./src/
 
 # The migration environment ships in the image because the `migrate` service
 # runs from it: the schema a build expects and the code that expects it then
