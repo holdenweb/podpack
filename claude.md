@@ -33,8 +33,8 @@ by hostname. Do not add `SERVER_NAME` handling or a site registry.
 
 | Directory | What it is | State |
 | --- | --- | --- |
-| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 7 commits, working |
-| `~/sites/hwpdf` | the PDF tools, extracted as a standalone installable package | 18 commits, the last four being the extraction; **not yet a podpack app** — see §5 |
+| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 13 commits, working |
+| `~/sites/pp-pdf` | the PDF tools as a standalone installable package | 20 commits; **reconciled** — installs as a podpack app and still works as a plain blueprint (§5) |
 | `~/sites/holdenweb.com` | the original Flask site | untouched; **not yet adapted** — see §6 |
 
 Guardrail carried over from the earlier sessions and still in force: **do not
@@ -309,10 +309,16 @@ site layer that overrides everything below.
 
 ## 7. What's next
 
-1. **Reconcile `hwpdf` with the registry** (§5). It is the real test of
-   out-of-repo discovery; `podpack_notes` only rehearses it.
-2. **Adapt `holdenweb.com`** to be a podpack site (§6), starting with config.
-3. Housekeeping: the MongoDB lab, `base_url`.
+1. **Adapt `holdenweb.com`** to be a podpack site (§6), starting with config.
+   This is the milestone; everything else here is small.
+2. Housekeeping: the MongoDB lab, `base_url`.
+3. **Decide about `pp-pdf`'s two discovery routes.** It exposes both a
+   `holdenweb.apps` entry point resolving to a bare blueprint and a `site_app`
+   for podpack. Both work and are tested; the entry point is what keeps the
+   package usable by a site that has never heard of this framework. Keep both,
+   or drop one, but do it deliberately rather than letting the entry point rot.
+
+Not on this list any more: reconciling the PDF tools, which is done (§5).
 
 ---
 
@@ -324,6 +330,12 @@ site layer that overrides everything below.
   strength of the code reading alone. Where a test asserts a framework
   guarantee, check it fails when the mechanism is disabled — a test that cannot
   fail is not evidence.
+- **Run the commands you document.** The README carries about twenty of them,
+  and they are as much a claim as anything in the code. `alembic revision
+  --autogenerate` sat there for weeks as the documented way to make a migration
+  and could never have worked — the only commands anyone had actually run were
+  the read-only ones beside it. A documented command that has not been executed
+  since it was written is an untested assertion.
 - **Comments explain *why*, not *what*.** The code does this consistently — the
   note on unbound extensions, on why `PGDATA` is a sub-directory, on why engine
   options are not defaulted. Match that density.

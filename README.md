@@ -14,8 +14,10 @@ name = "example.com"
 apps = ["podpack_notes"]
 ```
 
-Adding a feature to a running site is a line in that file and a restart — no
-code change, no rebuild, and no change to `compose.yaml`.
+Adding an already-installed feature to a running site requires adding a line
+in that file and a restart — no code change, no rebuild, and no change to
+`compose.yaml`.
+A rebuild is only required to install new apps.
 
 **One site per instance.** podpack builds a single site. It does not serve
 several domains from one process and there is no host-based routing; running two
