@@ -117,6 +117,55 @@ def test_the_default_front_page_is_there_when_nothing_claims_it(site):
     assert "No apps are installed yet" in body
 
 
+ORDER_APP = '''
+from flask import Blueprint
+from podpack import SiteApp
+
+blueprint = Blueprint("ordered", __name__)
+
+
+def _init(app):
+    # Relies on a service the *site* set up. If the site's init has not run,
+    # this raises and the ordering guarantee is broken.
+    app.config["ORDER"] = app.config["SITE_SERVICE"] + ",app"
+
+
+site_app = SiteApp(blueprint=blueprint, url_prefix="/ordered", init=_init)
+'''
+
+
+def test_the_site_wires_its_own_extensions(site):
+    """Mail, login and session policy belong to the site, not to any feature.
+
+    They are not apps: two of the three register no blueprint at all and the
+    third brings its own, so a `SiteApp` shim would mean inventing a blueprint
+    to satisfy a contract built around having one.
+    """
+    seen = {}
+
+    def wire(app):
+        seen["config_available"] = app.config["SECRET_KEY"] == "test-secret-key"
+        seen["state_available"] = "podpack" in app.extensions
+        app.config["SITE_SERVICE"] = "site"
+
+    app = site(init=wire)
+
+    assert seen == {"config_available": True, "state_available": True}
+    assert app.config["SITE_SERVICE"] == "site"
+
+
+def test_the_site_is_wired_before_its_apps(site, app_package):
+    """An app that sends mail should not have to care whether mail is ready."""
+    app_package("ordered_app", ORDER_APP)
+    app = site(
+        init=lambda a: a.config.__setitem__("SITE_SERVICE", "site"),
+        host_config={
+            "site": {"name": "s", "environment": "test", "apps": ["ordered_app"]}
+        },
+    )
+    assert app.config["ORDER"] == "site,app"
+
+
 def test_absolute_url_works_outside_a_request(site):
     """The gap `base_url` exists to fill.
 

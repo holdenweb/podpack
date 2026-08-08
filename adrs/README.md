@@ -34,6 +34,7 @@ here as against in `README.md` or `claude.md`.
 | [ADR-0022](0022-nav-is-contributed-and-addressed-by-endpoint.md) | **Nav is contributed by apps, addressed by endpoint.** A bad entry is a boot failure, because the chrome resolves nav on every page — so one broken link breaks the whole site, not one page. |
 | [ADR-0023](0023-no-warning-on-name-divergence.md) | **No warning when a blueprint's name differs from its module's.** The divergence is deliberate and useful; the mistake worth catching is already caught by Flask. Report the mapping instead of policing it. |
 | [ADR-0024](0024-the-front-page-belongs-to-the-site.md) | **The front page belongs to the site.** podpack's `/` is a fallback, registered only if no app claims it — it used to be a fixture, and won silently against any site that wanted its own front page. |
+| [ADR-0025](0025-the-site-wires-its-own-extensions.md) | **The site wires its own extensions.** `create_app(init=…)` for mail, login and session policy — which are not apps, because two register no blueprint and the third brings its own. |
 
 ## App state and data
 

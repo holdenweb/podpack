@@ -44,6 +44,7 @@ def create_app(
     config_overrides=None,
     *,
     site_package=None,
+    init=None,
     host_config=None,
     config_path=None,
     data_root=None,
@@ -54,6 +55,20 @@ def create_app(
     `site_package` names the package whose `templates/` and `static/` are the
     site's own; leaving it unset makes podpack itself the site, which is what
     the container lab does and what a brand-new site starts as.
+
+    `init` is the site's own wiring: a `callable(app)` for the extensions and
+    config that belong to the site rather than to any one feature -- mail, login,
+    session policy. It is what an app's `SiteApp.init` is, one level up, and it
+    exists because those things are not apps: `flask-mailman` and
+    `flask-paranoid` register no blueprint at all, and `flask-security` brings
+    its own, so dressing either as a `SiteApp` would mean inventing a blueprint
+    to satisfy a contract built around having one.
+
+    A site passes it from its own factory, which is also what gunicorn is
+    pointed at::
+
+        def create_app():
+            return podpack.create_app(site_package="holdenweb", init=_wire)
 
     `host_config` and the various roots exist so that tests can build a site
     without a mounted filesystem. In production every one of them is left unset
@@ -81,8 +96,17 @@ def create_app(
     from .core import core_blueprint, install_home_page
 
     app.register_blueprint(core_blueprint)
+
+    # The site's own wiring runs before its apps, so an app's `init` can rely on
+    # a service the site registered -- an app that sends mail should not have to
+    # care whether mail happens to have been configured yet. The site's config is
+    # already loaded and `app.extensions["podpack"]` already populated, so `init`
+    # can read `app_config()` and the host config like anything else.
+    if init is not None:
+        init(app)
+
     install_apps(app, installed_apps(host_config))
-    # After the apps, so an app that routes `/` keeps it; see install_home_page.
+    # After the apps, so anything that routes `/` keeps it; see install_home_page.
     install_home_page(app)
 
     @app.context_processor

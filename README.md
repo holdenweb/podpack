@@ -145,6 +145,37 @@ dependency that resolves to an sdist needing compilation fails there whatever
 its source. Wheels are fine; anything that has to be built is not, until a
 toolchain is added.
 
+### What a site wires for itself
+
+Some things belong to the site rather than to any one feature — mail, login,
+session policy. They are not apps, so they do not go in the `apps` list: pass a
+`callable(app)` as `init` instead.
+
+```python
+# holdenweb/__init__.py -- what gunicorn is pointed at
+import podpack
+
+def create_app():
+    return podpack.create_app(site_package="holdenweb", init=_wire)
+
+def _wire(app):
+    settings = podpack.app_config("mail")          # from [apps.mail] or your own table
+    app.config.update(MAIL_SERVER=settings["server"])
+    mail.init_app(app)
+    security.init_app(app, user_datastore)
+```
+
+It runs **after** the site's config is loaded and **before** the apps are
+installed, so an app's own `init` can rely on a service the site registered.
+
+The reason these are not apps is worth knowing, because writing shims to make
+them look like apps is a natural first thought: `flask-mailman` and
+`flask-paranoid` register no blueprint at all, and `flask-security` brings its
+own, created inside `init_app`. A `SiteApp` is built around a blueprint, so a
+shim would mean inventing one — and then inheriting a template namespace, a data
+directory and a log directory that nothing uses. See
+[ADR-0025](adrs/0025-the-site-wires-its-own-extensions.md).
+
 ### The app's name is its blueprint's name
 
 `site_app.name` is derived, not declared, and it identifies the app everywhere it
