@@ -400,6 +400,14 @@ rebuild rather than a reload, and `gunicorn --reload` covers development.
    package usable by a site that has never heard of this framework. Keep both,
    or drop one, but do it deliberately rather than letting the entry point rot.
 
+Settled 2026-08-08, so it is not reproposed: app distributions should be named
+`podpack-<app name>` as a **convention** only. Discovering apps by scanning for
+that prefix was considered and rejected — a scan installs nothing, so the
+dependency entry stays; what it would replace is the `apps` list, which is the
+part that decides what is enabled without a rebuild and in what order; and it
+finds nothing under an editable install, so it would fail exactly where it is
+most wanted. Entry points remain the answer if the list becomes a chore.
+
 Not on this list any more: reconciling the PDF tools, which is done (§5).
 
 ---

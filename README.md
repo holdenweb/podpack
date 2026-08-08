@@ -158,6 +158,34 @@ were two, nothing detected them disagreeing — the registry created and chowned
 one directory while the views read and wrote another, and `app_config()` quietly
 returned an empty dict, with nothing raised at boot or in the request.
 
+### Name the distribution `podpack-<app name>`
+
+A **convention, not a mechanism.** An app's distribution should be called
+`podpack-` plus the app's own name — `podpack-notes`, `podpack-pdf` — in the way
+`pytest-*` and `flask-*` packages are. It makes an app findable on an index and
+tells a reader at a glance what a package is for.
+
+podpack does *not* discover apps by scanning for that prefix, and the reasons are
+worth recording so the idea does not get reinvented:
+
+- **It would not remove anything.** Scanning finds what is installed; it does not
+  install it. The distribution is only present because the lockfile put it there,
+  so its dependency entry is needed either way. What a scan would replace is the
+  `apps` list — the other list.
+- **And the `apps` list is the part doing the work.** It decides what is
+  *enabled*, without a rebuild, and in what order. Discovery-by-presence means
+  in-the-image equals switched-on, so turning a feature off becomes a rebuild,
+  and ordering — which nav and `init` both depend on — is gone.
+- **It would fail quietly where it is needed most.** An editable install, which
+  is how you work on an app locally, need not register the module names such a
+  scan reads. Discovery would work in the built image and find nothing on the
+  bench.
+
+If the app list ever does become a chore, the answer is **entry points**, not a
+name prefix: they impose no naming, work for a distribution called anything, and
+`pp-pdf` already ships one. That is the hybrid worth building — entry points for
+discovery, the config list for ordering and enablement.
+
 ### Where an app lands is the site's decision
 
 The app list decides *whether* a feature is installed. The shape of the address
