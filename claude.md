@@ -236,6 +236,20 @@ site came up.
 - `config/app.toml` declares `base_url` and nothing reads it. Under single-site
   that is a meaningful setting (canonical URL for mail and feeds) — so wire it
   up or drop it.
+- **An app upgrade process, deliberately deferred.** Installing an app is
+  handled; upgrading one to a version whose expectations have changed is not.
+  Two known gaps, both harmless today because no app yet ships data:
+  - Shipped `data/` seeds **once** and never again, since the rule is "only if
+    the target is empty". An app that adds a file in a later version never
+    delivers it to a host that already has the directory.
+  - There is no once-only *code* hook. `SiteApp.init` runs every boot, so an app
+    needing genuine first-run work — generating a key, building an index — has
+    to detect emptiness itself and reimplement the rule.
+
+  Steve's call (2026-08-07): not yet. The trigger to watch for is not "a real
+  app" but specifically **an app that ships data expected to change with its
+  code** — `pp_pdf` is real and ships none. Solving it early would mean guessing
+  at what versioned seed data needs to do; solving it late means one migration.
 
 ---
 
