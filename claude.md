@@ -341,15 +341,38 @@ site layer that overrides everything below.
   Steve chose deletion. **But `/asset/` and `rewrite_asset_urls` must stay.**
   They are not HTTP-specific, and `data/html-pages/writing/images/` holds 12
   images that three pages reference relatively; deleting the route 404s them.
-- **`uwsgi.ini` is hardwired to Opalstack paths**
-  (`/home/sholden/apps/second-alma/`). Those should be relative to a
-  configuration parameter — perhaps an application name — that a `deploy`
-  utility helps establish, so sites can be deployed as Opalstack apps on demand.
-  Possibly moot for a podpack site: containers are now available on Opalstack, so
-  the deployment can be the compose stack rather than uwsgi at all (§4). Worth
-  settling before doing path-parameterisation work that may not be needed.
-- **Is content core or a plugin?** Still open. Easier to answer once `hwpdf` is
-  installed and there are two apps to compare.
+- **Is content core or a plugin?** Still open. Easier to answer once `pp-pdf` is
+  installed alongside another app and there are two to compare.
+
+### Settled: uwsgi goes, and the `deploy` utility with it
+
+The original brief asked for `uwsgi.ini`'s hardwired Opalstack paths
+(`/home/sholden/apps/second-alma/`) to be made relative to a configuration
+parameter, with a `deploy` utility to establish it. **That work is cancelled.**
+Containers run on Opalstack (§4), so the deployment is the compose stack and
+uwsgi is not in the picture at all. gunicorn calls the factory directly —
+`gunicorn 'holdenweb:create_app()'` — exactly as podpack's Containerfile already
+does.
+
+What that removes: `uwsgi.ini`, `wsgi.py`, the `pyuwsgi` dependency, and the
+module-level `app = create_app()` / `application = app.wsgi_app` at
+`__init__.py:315-316`.
+
+**The last of those is the real prize, and it is structural.** `wsgi.py` is the
+*only* importer of `app` and `application`, so those lines exist solely to feed
+uwsgi — and because of them, importing `holdenweb` builds a Flask app as a side
+effect, which is why `alembic/env.py:11` constructs an entire application just to
+reach `db.metadata`. Dropping uwsgi breaks that chain and a broken factory stops
+being a broken migration. podpack already has that property and a test that keeps
+it honest, by deleting `SECRET_KEY` and `SQLALCHEMY_DATABASE_URI` before building
+the migration metadata.
+
+What does *not* vanish, only relocate: `workers`/`threads` become gunicorn's
+`--workers` (already `GUNICORN_WORKERS`); `master`/`daemonize`/`pidfile` become
+podman plus `restart: unless-stopped` plus `loginctl enable-linger`;
+`http-socket` becomes `WEB_BIND_ADDR`/`WEB_HOST_PORT`. The one genuine loss is
+`touch-reload`, which has no container equivalent — `./scripts/up.sh` is a
+rebuild rather than a reload, and `gunicorn --reload` covers development.
 
 ---
 
