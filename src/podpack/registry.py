@@ -23,12 +23,13 @@ templates, `data/` if it ships data.
 """
 
 import shutil
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from importlib import import_module
 from importlib.resources import as_file, files
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Callable
+from typing import Any
 
 from flask import Blueprint, Flask
 
@@ -85,7 +86,7 @@ class PodpackState:
     "where does a request find its services" rather than two.
     """
 
-    host_config: dict
+    host_config: dict[str, Any]
     data_root: Path
     log_root: Path
     apps: dict[str, SiteApp] = field(default_factory=dict)
@@ -103,7 +104,7 @@ class PodpackState:
     """
 
 
-def install_apps(app: Flask, names) -> None:
+def install_apps(app: Flask, names: Iterable[str]) -> None:
     """Install each named app into `app`, in the order given.
 
     Order is the site's to choose, and it matters: nav entries appear in
@@ -163,7 +164,7 @@ def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
     return site_app
 
 
-def _check_mounts(state) -> None:
+def _check_mounts(state: PodpackState) -> None:
     """Refuse to boot on a mount for an app that is not installed.
 
     Keeping mounts in their own table costs one thing that keeping them inside
@@ -185,7 +186,7 @@ def _check_mounts(state) -> None:
         )
 
 
-def _reject_mount_in_app_config(state, name: str) -> None:
+def _reject_mount_in_app_config(state: PodpackState, name: str) -> None:
     """Refuse to boot on the old spelling rather than quietly ignoring it.
 
     Mounting used to be configured with `url_prefix` in the app's own
@@ -222,7 +223,7 @@ def _check_nav(app: Flask, site_app: SiteApp) -> None:
             )
 
 
-def import_app_models(names) -> None:
+def import_app_models(names: Iterable[str]) -> None:
     """Import every named app's models, and nothing else about the apps.
 
     The migration environment needs an app's tables on `db.metadata` but has no

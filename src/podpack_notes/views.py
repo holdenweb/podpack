@@ -10,6 +10,7 @@ from logging import getLogger
 
 import sqlalchemy as sa
 from flask import Blueprint, jsonify, render_template, request
+from flask.typing import ResponseReturnValue
 
 from podpack import app_config, db
 from podpack.paths import data_dir
@@ -24,7 +25,7 @@ WELCOME_FILE = "welcome.md"
 
 
 @blueprint.route("/")
-def index():
+def index() -> ResponseReturnValue:
     """The app's own page, rendered in whatever chrome the site provides."""
     return render_template(
         "notes/index.html",
@@ -35,12 +36,12 @@ def index():
 
 
 @blueprint.route("/list")
-def list_notes():
+def list_notes() -> ResponseReturnValue:
     return jsonify(notes=[note.as_dict() for note in _recent()])
 
 
 @blueprint.route("/", methods=["POST"])
-def add_note():
+def add_note() -> ResponseReturnValue:
     """Persist a note, i.e. write to the host-mapped database directory."""
     text = (request.get_json(silent=True) or {}).get("text", "").strip()
     if not text:
@@ -53,7 +54,7 @@ def add_note():
 
 
 @blueprint.route("/uploads/<name>", methods=["POST"])
-def store_file(name):
+def store_file(name: str) -> ResponseReturnValue:
     """Persist a file in this app's own directory under the host data root.
 
     The app never learns where that is: `data_dir()` resolves it, so moving the
@@ -64,13 +65,13 @@ def store_file(name):
     return jsonify(stored=target.name, bytes=target.stat().st_size), 201
 
 
-def _recent():
+def _recent() -> list[Note]:
     """The most recent notes, however many this site asks for."""
     limit = app_config().get("page_size", 20)
     return list(db.session.scalars(sa.select(Note).order_by(Note.created.desc()).limit(limit)))
 
 
-def _welcome_text():
+def _welcome_text() -> str | None:
     """Read the shipped welcome note back from the *host* copy.
 
     The app ships this file in its `data/` directory and the registry seeds it

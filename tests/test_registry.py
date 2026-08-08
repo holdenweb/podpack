@@ -5,16 +5,22 @@ not, so a failure here means the plugin mechanism has stopped being a plugin
 mechanism.
 """
 
+from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 
 import pytest
-from flask import Blueprint, url_for
+from flask import Blueprint, Flask, url_for
+from flask.testing import FlaskClient
+
+from conftest import SiteFactory
 
 from podpack import Section, SiteApp, absolute_url, app_config, create_app, db
 from podpack.paths import data_dir, unclaimed
 
 
-def test_app_list_is_configuration_not_code(site):
+def test_app_list_is_configuration_not_code(site: SiteFactory) -> None:
     """Installing an app must be an edit to the config file and nothing else."""
     with_notes = site()
     without = site(host_config={"site": {"name": "bare", "environment": "test", "apps": []}})
@@ -24,7 +30,7 @@ def test_app_list_is_configuration_not_code(site):
     assert without.extensions["podpack"].nav == []
 
 
-def test_models_reach_metadata(app):
+def test_models_reach_metadata(app: Flask) -> None:
     """The claim alembic depends on.
 
     Autogenerate reads `db.metadata` after building an app, so an installed
@@ -34,7 +40,7 @@ def test_models_reach_metadata(app):
     assert "notes" in db.metadata.tables
 
 
-def test_nav_is_contributed_by_apps(app, client):
+def test_nav_is_contributed_by_apps(app: Flask, client: FlaskClient) -> None:
     assert app.extensions["podpack"].nav == [Section("Notes", "notes.index")]
     body = client.get("/").get_data(as_text=True)
     # Twice over: the header nav in base.html, and the installed-apps list in
@@ -46,7 +52,7 @@ def test_nav_is_contributed_by_apps(app, client):
     assert 'href=""' not in body
 
 
-def test_site_can_mount_an_app_where_it_likes(site):
+def test_site_can_mount_an_app_where_it_likes(site: SiteFactory) -> None:
     """An app's `url_prefix` is what it asks for, not what it gets.
 
     The app list decides *whether* a feature is installed; the shape of the
@@ -82,7 +88,7 @@ blueprint = Blueprint("front", __name__)
 
 
 @blueprint.route("/")
-def index():
+def index() -> str:
     return "THE SITE'S OWN FRONT PAGE"
 
 
@@ -90,7 +96,7 @@ site_app = SiteApp(blueprint=blueprint, url_prefix=None)
 '''
 
 
-def test_an_app_may_claim_the_site_root(site, app_package):
+def test_an_app_may_claim_the_site_root(site: SiteFactory, app_package: Callable[[str, str], str]) -> None:
     """`/` belongs to the site, not to the framework.
 
     podpack serves a default front page so that a site with no apps shows
@@ -109,7 +115,7 @@ def test_an_app_may_claim_the_site_root(site, app_package):
     assert [r.endpoint for r in app.url_map.iter_rules() if str(r.rule) == "/"] == ["front.index"]
 
 
-def test_the_default_front_page_is_there_when_nothing_claims_it(site):
+def test_the_default_front_page_is_there_when_nothing_claims_it(site: SiteFactory) -> None:
     """A site with no apps is a valid site and should not 404 on its own root."""
     app = site(host_config={"site": {"name": "bare", "environment": "test", "apps": []}})
 
@@ -118,13 +124,13 @@ def test_the_default_front_page_is_there_when_nothing_claims_it(site):
 
 
 ORDER_APP = '''
-from flask import Blueprint
+from flask import Blueprint, Flask
 from podpack import SiteApp
 
 blueprint = Blueprint("ordered", __name__)
 
 
-def _init(app):
+def _init(app: Flask) -> None:
     # Relies on a service the *site* set up. If the site's init has not run,
     # this raises and the ordering guarantee is broken.
     app.config["ORDER"] = app.config["SITE_SERVICE"] + ",app"
@@ -134,7 +140,7 @@ site_app = SiteApp(blueprint=blueprint, url_prefix="/ordered", init=_init)
 '''
 
 
-def test_the_site_wires_its_own_extensions(site):
+def test_the_site_wires_its_own_extensions(site: SiteFactory) -> None:
     """Mail, login and session policy belong to the site, not to any feature.
 
     They are not apps: two of the three register no blueprint at all and the
@@ -143,7 +149,7 @@ def test_the_site_wires_its_own_extensions(site):
     """
     seen = {}
 
-    def wire(app):
+    def wire(app: Flask) -> None:
         seen["config_available"] = app.config["SECRET_KEY"] == "test-secret-key"
         seen["state_available"] = "podpack" in app.extensions
         app.config["SITE_SERVICE"] = "site"
@@ -154,7 +160,7 @@ def test_the_site_wires_its_own_extensions(site):
     assert app.config["SITE_SERVICE"] == "site"
 
 
-def test_the_site_is_wired_before_its_apps(site, app_package):
+def test_the_site_is_wired_before_its_apps(site: SiteFactory, app_package: Callable[[str, str], str]) -> None:
     """An app that sends mail should not have to care whether mail is ready."""
     app_package("ordered_app", ORDER_APP)
     app = site(
@@ -166,7 +172,7 @@ def test_the_site_is_wired_before_its_apps(site, app_package):
     assert app.config["ORDER"] == "site,app"
 
 
-def test_absolute_url_works_outside_a_request(site):
+def test_absolute_url_works_outside_a_request(site: SiteFactory) -> None:
     """The gap `base_url` exists to fill.
 
     Inside a request Flask builds an external URL from the `Host` header and
@@ -189,14 +195,14 @@ def test_absolute_url_works_outside_a_request(site):
             url_for("notes.index", _external=True)
 
 
-def test_absolute_url_falls_back_to_the_request(site):
+def test_absolute_url_falls_back_to_the_request(site: SiteFactory) -> None:
     """A site need not set `base_url`; in a request Flask already knows."""
     app = site()
     with app.test_request_context("/", base_url="https://asked-for.example"):
         assert absolute_url("notes.index") == "https://asked-for.example/notes/"
 
 
-def test_a_base_url_that_cannot_be_joined_to_is_a_boot_failure(site):
+def test_a_base_url_that_cannot_be_joined_to_is_a_boot_failure(site: SiteFactory) -> None:
     """`urljoin('example.com', '/x')` is `/x` -- a link nothing can follow.
 
     Silently useless is the worst outcome for a value whose only job is to be
@@ -215,7 +221,7 @@ def test_a_base_url_that_cannot_be_joined_to_is_a_boot_failure(site):
         )
 
 
-def test_data_left_by_an_uninstalled_app_is_reported(app):
+def test_data_left_by_an_uninstalled_app_is_reported(app: Flask) -> None:
     """Uninstalling keeps an app's data, so something has to say it is there.
 
     Removing an app from `apps` deliberately does not delete what it was
@@ -235,12 +241,12 @@ def test_data_left_by_an_uninstalled_app_is_reported(app):
     assert "notes" not in unclaimed(state.data_root, state.apps)
 
 
-def test_unclaimed_survives_a_root_that_does_not_exist(tmp_path):
+def test_unclaimed_survives_a_root_that_does_not_exist(tmp_path: Path) -> None:
     """A site with no apps installed never creates a root at all."""
     assert unclaimed(tmp_path / "never-made", {}) == []
 
 
-def test_the_import_name_is_recorded_for_reporting(app):
+def test_the_import_name_is_recorded_for_reporting(app: Flask) -> None:
     """An app's import name and its own name differ routinely, and it matters.
 
     `apps` lists the import name; `[site.mounts]`, `[apps.<name>]` and the data
@@ -251,7 +257,7 @@ def test_the_import_name_is_recorded_for_reporting(app):
     assert app.extensions["podpack"].installed_from == {"notes": "podpack_notes"}
 
 
-def test_mounting_is_not_visible_to_the_app(site):
+def test_mounting_is_not_visible_to_the_app(site: SiteFactory) -> None:
     """Where an app is mounted is the site's business, not the app's.
 
     The two used to share `[apps.<name>]`, so `app_config()` handed the app the
@@ -272,7 +278,7 @@ def test_mounting_is_not_visible_to_the_app(site):
         assert app_config() == {"page_size": 5}
 
 
-def test_mounting_an_app_that_is_not_installed_is_a_boot_failure(site):
+def test_mounting_an_app_that_is_not_installed_is_a_boot_failure(site: SiteFactory) -> None:
     """The one thing a separate table costs: it can drift from the app list.
 
     Silently ignoring the stray entry would leave the app at the address it
@@ -291,7 +297,7 @@ def test_mounting_an_app_that_is_not_installed_is_a_boot_failure(site):
         )
 
 
-def test_the_old_spelling_is_rejected_rather_than_ignored(site):
+def test_the_old_spelling_is_rejected_rather_than_ignored(site: SiteFactory) -> None:
     """`url_prefix` in the app's own table used to be how this was configured.
 
     Quietly ignoring it would downgrade a site that had not been updated, with
@@ -301,7 +307,7 @@ def test_the_old_spelling_is_rejected_rather_than_ignored(site):
         site(host_config={"apps": {"notes": {"url_prefix": "/writing/notes"}}})
 
 
-def test_nav_naming_an_unknown_endpoint_is_a_boot_failure(site, monkeypatch):
+def test_nav_naming_an_unknown_endpoint_is_a_boot_failure(site: SiteFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     """Better than a link that only fails when somebody clicks it.
 
     A bad nav endpoint breaks `url_for` in the chrome, so it would take out
@@ -318,14 +324,14 @@ def test_nav_naming_an_unknown_endpoint_is_a_boot_failure(site, monkeypatch):
         site()
 
 
-def test_app_template_is_namespaced_and_used(client):
+def test_app_template_is_namespaced_and_used(client: FlaskClient) -> None:
     """`notes/index.html` must resolve to the app's own copy."""
     response = client.get("/notes/")
     assert response.status_code == 200
     assert "<h2>Notes</h2>" in response.get_data(as_text=True)
 
 
-def test_app_renders_on_a_site_with_no_chrome(site, site_package):
+def test_app_renders_on_a_site_with_no_chrome(site: SiteFactory, site_package: Callable[[str, dict[str, str]], str]) -> None:
     """An app must render against a site that ships no base.html of its own.
 
     This is the one that actually exercises the fallback loader: the site
@@ -341,7 +347,7 @@ def test_app_renders_on_a_site_with_no_chrome(site, site_package):
     assert "Served by podpack" in body  # podpack's default chrome
 
 
-def test_site_can_override_an_app_template(site, site_package):
+def test_site_can_override_an_app_template(site: SiteFactory, site_package: Callable[[str, dict[str, str]], str]) -> None:
     """A site overrides an app's template by shipping the same namespaced path.
 
     This precedence is Flask's own ordering rather than anything podpack adds,
@@ -354,13 +360,13 @@ def test_site_can_override_an_app_template(site, site_package):
     assert app.test_client().get("/notes/").get_data(as_text=True) == "OVERRIDDEN"
 
 
-def test_per_app_directories_are_created(app):
+def test_per_app_directories_are_created(app: Flask) -> None:
     state = app.extensions["podpack"]
     assert (state.data_root / "notes").is_dir()
     assert (state.log_root / "notes").is_dir()
 
 
-def test_shipped_data_is_seeded_once(app, site):
+def test_shipped_data_is_seeded_once(app: Flask, site: SiteFactory) -> None:
     """Seeding follows the db-init rule: first time on this machine, not every
     restart. Re-arming means deleting the app's host data directory."""
     welcome = app.extensions["podpack"].data_root / "notes" / "welcome.md"
@@ -375,14 +381,14 @@ def test_shipped_data_is_seeded_once(app, site):
     assert "ships inside the notes app" in welcome.read_text()
 
 
-def test_seeded_data_is_read_from_the_host_copy(app, client):
+def test_seeded_data_is_read_from_the_host_copy(app: Flask, client: FlaskClient) -> None:
     """Editing the host copy must change the page, with no rebuild."""
     welcome = app.extensions["podpack"].data_root / "notes" / "welcome.md"
     welcome.write_text("host-side edit")
     assert "host-side edit" in client.get("/notes/").get_data(as_text=True)
 
 
-def test_app_config_is_namespaced(client, app):
+def test_app_config_is_namespaced(client: FlaskClient, app: Flask) -> None:
     """An app reads its own section of the host config and no one else's."""
     from podpack import app_config
 
@@ -391,7 +397,7 @@ def test_app_config_is_namespaced(client, app):
         assert app_config("notes") == {"page_size": 5}
 
 
-def test_app_name_is_its_blueprint_name(app):
+def test_app_name_is_its_blueprint_name(app: Flask) -> None:
     """One name, so it cannot be two names that disagree.
 
     `data_dir()` and `app_config()` resolve the app from `request.blueprint`,
@@ -411,13 +417,15 @@ def test_app_name_is_its_blueprint_name(app):
         assert app_config() == {"page_size": 5}
 
 
-def test_site_app_takes_no_name_of_its_own(site):
+def test_site_app_takes_no_name_of_its_own(site: SiteFactory) -> None:
     """Declaring a name separately is now an error rather than a hazard."""
     with pytest.raises(TypeError):
-        SiteApp(name="mismatched", blueprint=Blueprint("bp", __name__))
+        # mypy flags this too, which is the decision holding from a second
+        # direction: the name is derived, so there is no argument to pass.
+        SiteApp(name="mismatched", blueprint=Blueprint("bp", __name__))  # type: ignore[call-arg]
 
 
-def test_migration_metadata_needs_no_application(tmp_path, monkeypatch):
+def test_migration_metadata_needs_no_application(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The migration environment must not need a Flask app, or its secrets.
 
     Building the target metadata deliberately does not call `create_app`, so
@@ -436,12 +444,12 @@ def test_migration_metadata_needs_no_application(tmp_path, monkeypatch):
     assert "notes" in target_metadata(config).tables
 
 
-def test_unknown_app_is_a_boot_failure(site):
+def test_unknown_app_is_a_boot_failure(site: SiteFactory) -> None:
     with pytest.raises(ModuleNotFoundError):
         site(host_config={"site": {"name": "x", "environment": "test", "apps": ["no_such_app"]}})
 
 
-def test_module_without_site_app_is_rejected(site):
+def test_module_without_site_app_is_rejected(site: SiteFactory) -> None:
     """A clear error beats a site that boots with a feature silently missing."""
     with pytest.raises(RuntimeError, match="no module-level"):
         site(host_config={"site": {"name": "x", "environment": "test", "apps": ["json"]}})

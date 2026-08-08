@@ -12,7 +12,8 @@ The third is `/`, and it is a *fallback* rather than a fixture -- see
 import os
 
 import sqlalchemy as sa
-from flask import Blueprint, current_app, jsonify, render_template
+from flask import Blueprint, Flask, current_app, jsonify, render_template
+from flask.typing import ResponseReturnValue
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
@@ -21,7 +22,7 @@ from .paths import unclaimed
 core_blueprint = Blueprint("podpack", __name__)
 
 
-def install_home_page(app):
+def install_home_page(app: Flask) -> None:
     """Serve a default front page, but only if nothing else wants `/`.
 
     A site with no apps is a perfectly valid site and should show something
@@ -41,13 +42,13 @@ def install_home_page(app):
         return
 
     @app.route("/")
-    def home():
+    def home() -> ResponseReturnValue:
         state = app.extensions["podpack"]
         return render_template("index.html", title=state.host_config["site"]["name"])
 
 
 @core_blueprint.route("/healthz")
-def healthz():
+def healthz() -> ResponseReturnValue:
     """Liveness *and* readiness: the site is no use without its database."""
     try:
         db.session.execute(sa.text("SELECT 1"))
@@ -58,7 +59,7 @@ def healthz():
 
 
 @core_blueprint.route("/_status")
-def status():
+def status() -> ResponseReturnValue:
     """Report where every piece of this site's state actually lives.
 
     If a bind mount or a grant is wrong, this route says so -- which is why the

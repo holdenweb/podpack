@@ -31,6 +31,6 @@ class Section:
     endpoint: str
 
 
-def sections():
+def sections() -> tuple[Section, ...]:
     """The nav entries for the current app, in installation order."""
     return tuple(current_app.extensions["podpack"].nav)

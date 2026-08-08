@@ -824,12 +824,19 @@ inherited from the original lab and had never been tested.
 ```bash
 uv sync
 uv run pytest
+uv run mypy
 ```
 
 The tests cover what the registry promises — that the app list is configuration
 rather than code, that models reach `db.metadata`, that template namespacing and
 site override both work, that data seeds once and re-arms on deletion, and that
 the migration environment needs no Flask app.
+
+`mypy` is a dependency rather than something to remember, because annotations
+nobody checks are comments that look authoritative. It reads its settings from
+`pyproject.toml` and covers `src/` and `tests/` both. Two suppressions exist and
+both say why in place: `db.Model`, which flask-sqlalchemy builds at runtime, and
+one deliberate `SiteApp(name=...)` in a test that asserts the call is an error.
 
 There is a MongoDB sibling of this substrate, near-identical in shape and on
 different ports so the two can run side by side. It stayed in the holdenweb.com

@@ -23,12 +23,13 @@ than as routing configuration, keeps it from having opinions about which
 requests are allowed to arrive.
 """
 
+from typing import Any
 from urllib.parse import urlsplit
 
 from flask import current_app, url_for
 
 
-def base_url():
+def base_url() -> str | None:
     """The site's canonical public address, or None if it has not set one.
 
     Note this is the address the *world* uses, which on a proxied host is
@@ -39,7 +40,7 @@ def base_url():
     return current_app.extensions["podpack"].host_config.get("site", {}).get("base_url")
 
 
-def absolute_url(endpoint, **values):
+def absolute_url(endpoint: str, **values: Any) -> str:
     """Build a fully-qualified URL for `endpoint`.
 
     Where a site has set `base_url`, this binds the URL map to that address
@@ -60,7 +61,7 @@ def absolute_url(endpoint, **values):
     return adapter.build(endpoint, values, force_external=True)
 
 
-def check_base_url(host_config):
+def check_base_url(host_config: dict[str, Any]) -> None:
     """Refuse to boot on a `base_url` that cannot be joined to.
 
     `urljoin` silently does the wrong thing with a relative or scheme-less

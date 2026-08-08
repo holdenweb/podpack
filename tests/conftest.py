@@ -1,8 +1,17 @@
 import sys
+from collections.abc import Callable, Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
+from flask import Flask
+from flask.testing import FlaskClient
 
 from podpack import create_app, db
+
+# What the `site` fixture hands back: podpack's factory with the test's roots
+# and host config already bound in, so a test names only what it is varying.
+SiteFactory = Callable[..., Flask]
 
 # Secrets come from the environment in production; tests set them here rather
 # than relying on whatever happens to be exported in the shell.
@@ -13,7 +22,7 @@ TEST_ENV = {
 
 
 @pytest.fixture
-def host_config():
+def host_config() -> dict[str, Any]:
     """The kind of dict that would otherwise be read from a mounted TOML file."""
     return {
         "site": {
@@ -27,7 +36,9 @@ def host_config():
 
 
 @pytest.fixture
-def site(monkeypatch, tmp_path, host_config):
+def site(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, host_config: dict[str, Any]
+) -> SiteFactory:
     """Build a site whose data and log roots are throwaway directories.
 
     SQLite in memory and roots under tmp_path mean the registry can be tested
@@ -38,7 +49,7 @@ def site(monkeypatch, tmp_path, host_config):
     for key, value in TEST_ENV.items():
         monkeypatch.setenv(key, value)
 
-    def _build(**overrides):
+    def _build(**overrides: Any) -> Flask:
         config = {**host_config, **overrides.pop("host_config", {})}
         app = create_app(
             host_config=config,
@@ -54,7 +65,7 @@ def site(monkeypatch, tmp_path, host_config):
 
 
 @pytest.fixture
-def site_package(tmp_path):
+def site_package(tmp_path: Path) -> Iterator[Callable[[str, dict[str, str]], str]]:
     """Create an importable stand-in for a site package, with given templates.
 
     A real site is a package with its own `templates/`; these tests need one to
@@ -63,7 +74,7 @@ def site_package(tmp_path):
     """
     created = []
 
-    def _make(name, templates):
+    def _make(name: str, templates: dict[str, str]) -> str:
         root = tmp_path / name
         (root / "templates").mkdir(parents=True)
         (root / "__init__.py").write_text("")
@@ -85,7 +96,7 @@ def site_package(tmp_path):
 
 
 @pytest.fixture
-def app_package(tmp_path):
+def app_package(tmp_path: Path) -> Iterator[Callable[[str, str], str]]:
     """Create an importable single-module podpack app with the given source.
 
     Cheaper and clearer than shipping a second fixture app in the repository,
@@ -94,7 +105,7 @@ def app_package(tmp_path):
     """
     created = []
 
-    def _make(name, source):
+    def _make(name: str, source: str) -> str:
         (tmp_path / f"{name}.py").write_text(source)
         created.append(name)
         if str(tmp_path) not in sys.path:
@@ -110,10 +121,10 @@ def app_package(tmp_path):
 
 
 @pytest.fixture
-def app(site):
+def app(site: SiteFactory) -> Flask:
     return site()
 
 
 @pytest.fixture
-def client(app):
+def client(app: Flask) -> FlaskClient:
     return app.test_client()

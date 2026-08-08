@@ -7,11 +7,12 @@ without the migration environment having heard of the app.
 """
 
 from datetime import datetime, timezone
+from typing import Any
 
 from podpack import db
 
 
-class Note(db.Model):
+class Note(db.Model):  # type: ignore[name-defined]  # flask-sqlalchemy builds db.Model at runtime
     """A note. Unqualified, so it lands in whatever `search_path` says.
 
     The bootstrap in db-init/ sets the application role's search_path to the
@@ -29,5 +30,5 @@ class Note(db.Model):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    def as_dict(self):
+    def as_dict(self) -> dict[str, Any]:
         return {"id": self.id, "text": self.text, "created": self.created.isoformat()}

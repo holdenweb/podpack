@@ -18,21 +18,22 @@ paths themselves, so that the layout stays the framework's business.
 
 import logging
 import pathlib
+from collections.abc import Iterable
 
 from flask import current_app, request
 
 
-def data_root():
+def data_root() -> pathlib.Path:
     """The root under which every app's data directory is created."""
     return current_app.extensions["podpack"].data_root
 
 
-def log_root():
+def log_root() -> pathlib.Path:
     """The root under which every app's log directory is created."""
     return current_app.extensions["podpack"].log_root
 
 
-def data_dir(name=None):
+def data_dir(name: str | None = None) -> pathlib.Path:
     """The calling app's persistent data directory on the host.
 
     `name` defaults to the blueprint handling the current request, so an app's
@@ -41,12 +42,12 @@ def data_dir(name=None):
     return data_root() / (name or _current_app_name())
 
 
-def log_dir(name=None):
+def log_dir(name: str | None = None) -> pathlib.Path:
     """The calling app's log directory on the host."""
     return log_root() / (name or _current_app_name())
 
 
-def _current_app_name():
+def _current_app_name() -> str:
     """The installed app handling this request.
 
     A plugin's blueprint is registered under the app's own name, so the
@@ -74,7 +75,7 @@ def prepare(root: pathlib.Path, name: str) -> pathlib.Path:
     return target
 
 
-def unclaimed(root: pathlib.Path, installed) -> list[str]:
+def unclaimed(root: pathlib.Path, installed: Iterable[str]) -> list[str]:
     """Entries under `root` that no installed app answers for.
 
     The roots are supposed to hold one subdirectory per installed app and
@@ -99,7 +100,9 @@ def unclaimed(root: pathlib.Path, installed) -> list[str]:
     return sorted(entry.name for entry in entries if entry.name not in installed)
 
 
-def attach_file_logging(module_name: str, directory: pathlib.Path, filename: str):
+def attach_file_logging(
+    module_name: str, directory: pathlib.Path, filename: str
+) -> None:
     """Send an app's log records to its own file as well as to stdout.
 
     The handler goes on the *package's* logger, so an app that does nothing more

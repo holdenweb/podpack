@@ -13,11 +13,15 @@ of the application factory means a broken factory is not also a broken
 migration.
 """
 
+import pathlib
+
+from sqlalchemy import MetaData
+
 from .config import installed_apps, load_host_config
 from .registry import import_app_models
 
 
-def target_metadata(config_path=None):
+def target_metadata(config_path: str | pathlib.Path | None = None) -> MetaData:
     """The metadata alembic should compare the database against.
 
     Read this as the honest statement of the footgun it implies: the result

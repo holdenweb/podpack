@@ -14,6 +14,7 @@ later as puzzling behaviour rather than immediately as a failure to boot.
 import os
 import pathlib
 import tomllib
+from typing import Any
 
 from flask import current_app
 
@@ -24,7 +25,7 @@ DEFAULT_CONFIG_PATH = pathlib.Path(
 )
 
 
-def load_host_config(path=None):
+def load_host_config(path: str | pathlib.Path | None = None) -> dict[str, Any]:
     """Read the host-supplied TOML config, failing loudly if it is missing.
 
     Refusing to start beats starting with silent defaults: a missing file here
@@ -41,7 +42,7 @@ def load_host_config(path=None):
         return tomllib.load(stream)
 
 
-def require_env(name):
+def require_env(name: str) -> str:
     """Return an environment variable, or explain which one is missing."""
     try:
         return os.environ[name]
@@ -49,7 +50,7 @@ def require_env(name):
         raise RuntimeError(f"required environment variable {name} is not set") from None
 
 
-def installed_apps(host_config):
+def installed_apps(host_config: dict[str, Any]) -> list[str]:
     """The site's app list, which is configuration rather than code.
 
     It lives in the host config file and not in the environment because it is
@@ -60,7 +61,7 @@ def installed_apps(host_config):
     return list(host_config.get("site", {}).get("apps", []))
 
 
-def app_config(name=None):
+def app_config(name: str | None = None) -> dict[str, Any]:
     """An installed app's own section of the host config file.
 
     Apps get a namespace of their own, so that a site can tune one without

@@ -30,4 +30,12 @@ build-backend = "uv_build"
 module-name = ["podpack", "podpack_notes"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "mypy>=1.11"]
+
+[tool.mypy]
+# Annotations nobody checks are comments that look authoritative, so the
+# checker is a dependency rather than something to remember to install.
+files = ["src", "tests"]
+# Flask-SQLAlchemy and flask-paranoid ship no stubs; missing imports would
+# otherwise drown the errors worth reading.
+ignore_missing_imports = true

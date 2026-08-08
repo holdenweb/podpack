@@ -10,7 +10,9 @@ code change, no rebuild, and no change to the compose file.
 """
 
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
@@ -41,15 +43,15 @@ DEFAULT_LOG_ROOT = "/var/log/holdenweb/apps"
 
 
 def create_app(
-    config_overrides=None,
+    config_overrides: dict[str, Any] | None = None,
     *,
-    site_package=None,
-    init=None,
-    host_config=None,
-    config_path=None,
-    data_root=None,
-    log_root=None,
-):
+    site_package: str | None = None,
+    init: Callable[[Flask], None] | None = None,
+    host_config: dict[str, Any] | None = None,
+    config_path: str | Path | None = None,
+    data_root: str | Path | None = None,
+    log_root: str | Path | None = None,
+) -> Flask:
     """Build a site.
 
     `site_package` names the package whose `templates/` and `static/` are the
@@ -110,7 +112,7 @@ def create_app(
     install_home_page(app)
 
     @app.context_processor
-    def _nav():
+    def _nav() -> dict[str, Any]:
         """Put the assembled navigation in front of every template, so that an
         app's pages get the site's chrome without each view remembering to pass
         it."""
@@ -119,7 +121,7 @@ def create_app(
     return app
 
 
-def _configure(app, host_config):
+def _configure(app: Flask, host_config: dict[str, Any]) -> None:
     """Apply the two configuration layers, secrets last.
 
     Connection details are a secret and come from the environment; how the pool
@@ -153,7 +155,7 @@ def _configure(app, host_config):
         app.config["MAX_CONTENT_LENGTH"] = limits["max_upload_bytes"]
 
 
-def _add_template_fallback(app):
+def _add_template_fallback(app: Flask) -> None:
     """Search podpack's own templates last of all.
 
     Flask already searches the app's template folder before any blueprint's, so
@@ -166,6 +168,9 @@ def _add_template_fallback(app):
     which means an app renders against sensible chrome on a site that has not
     written any of its own yet, and every layer above can still override it.
     """
-    app.jinja_env.loader = ChoiceLoader(
-        [app.jinja_env.loader, PackageLoader("podpack", "templates")]
-    )
+    existing = app.jinja_env.loader
+    fallback = PackageLoader("podpack", "templates")
+    # Flask always installs a loader, but its type says otherwise and an app
+    # built without one would otherwise get a ChoiceLoader with a None in it --
+    # which fails later, while rendering, rather than here.
+    app.jinja_env.loader = ChoiceLoader([existing, fallback]) if existing else fallback
