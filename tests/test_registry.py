@@ -11,7 +11,7 @@ import pytest
 from flask import Blueprint
 
 from podpack import Section, SiteApp, app_config, create_app, db
-from podpack.paths import data_dir
+from podpack.paths import data_dir, unclaimed
 
 
 def test_app_list_is_configuration_not_code(site):
@@ -72,6 +72,31 @@ def test_site_can_mount_an_app_where_it_likes(site):
     assert 'href="/writing/notes/"' in client.get("/").get_data(as_text=True)
     # And what /_status reports is where the app actually ended up.
     assert app.extensions["podpack"].apps["notes"].url_prefix == "/writing/notes"
+
+
+def test_data_left_by_an_uninstalled_app_is_reported(app):
+    """Uninstalling keeps an app's data, so something has to say it is there.
+
+    Removing an app from `apps` deliberately does not delete what it was
+    holding. Without this, the disk and `/_status` disagree about what the site
+    consists of, and the difference is invisible until somebody goes looking on
+    the host.
+    """
+    state = app.extensions["podpack"]
+    assert unclaimed(state.data_root, state.apps) == []
+
+    # An app that used to be installed, and the data it left behind.
+    (state.data_root / "retired_app").mkdir()
+    (state.data_root / "stray.txt").write_text("not an app's directory either")
+
+    assert unclaimed(state.data_root, state.apps) == ["retired_app", "stray.txt"]
+    # ...and the installed app is still not mistaken for one of them.
+    assert "notes" not in unclaimed(state.data_root, state.apps)
+
+
+def test_unclaimed_survives_a_root_that_does_not_exist(tmp_path):
+    """A site with no apps installed never creates a root at all."""
+    assert unclaimed(tmp_path / "never-made", {}) == []
 
 
 def test_the_import_name_is_recorded_for_reporting(app):

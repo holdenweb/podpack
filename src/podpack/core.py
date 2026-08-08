@@ -13,6 +13,7 @@ from flask import Blueprint, current_app, jsonify, render_template
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
+from .paths import unclaimed
 
 core_blueprint = Blueprint("podpack", __name__)
 
@@ -60,6 +61,13 @@ def status():
         database_schema=row[2],
         data_root=str(state.data_root),
         log_root=str(state.log_root),
+        # What is on disk that no installed app answers for -- normally empty.
+        # An app removed from `apps` keeps its data, deliberately, so this is
+        # how that data stays visible rather than merely still being there.
+        unclaimed={
+            "data": unclaimed(state.data_root, state.apps),
+            "logs": unclaimed(state.log_root, state.apps),
+        },
         apps={
             name: {
                 # The import name in `apps`, which is not always the app's own

@@ -74,6 +74,31 @@ def prepare(root: pathlib.Path, name: str) -> pathlib.Path:
     return target
 
 
+def unclaimed(root: pathlib.Path, installed) -> list[str]:
+    """Entries under `root` that no installed app answers for.
+
+    The roots are supposed to hold one subdirectory per installed app and
+    nothing else. They drift anyway, and legitimately: removing an app from the
+    site's `apps` list deliberately does *not* delete its data, because
+    uninstalling a feature should not destroy what it was holding. So a
+    directory outstays its app, and until it is reported the disk and
+    `/_status` quietly disagree about what the site consists of.
+
+    Reported rather than removed. Deleting data because a config line changed
+    would be the wrong instinct entirely -- the point is to make what is there
+    visible, and leave the decision where it belongs.
+
+    Files are listed as well as directories: an app's name buys it a directory,
+    so anything else at this level is equally unaccounted for.
+    """
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        # The root need not exist yet -- a site with no apps never creates one.
+        return []
+    return sorted(entry.name for entry in entries if entry.name not in installed)
+
+
 def attach_file_logging(module_name: str, directory: pathlib.Path, filename: str):
     """Send an app's log records to its own file as well as to stdout.
 

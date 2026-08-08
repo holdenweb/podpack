@@ -56,6 +56,20 @@ The import name is worth having in front of you, because it is routinely *not*
 the app's own name — `podpack_notes` is what `apps` lists, and `notes` is what
 keys `[site.mounts]`, `[apps.<name>]` and the directories on disk.
 
+It also reports anything under the roots that **no installed app answers for**:
+
+```json
+"unclaimed": { "data": ["retired_app"], "logs": ["retired_app"] }
+```
+
+Normally both are empty, because the roots hold one subdirectory per installed
+app and nothing else. They drift legitimately, though: removing an app from
+`apps` deliberately does *not* delete its data, since uninstalling a feature
+should not destroy what it was holding. Reported rather than removed — deleting
+data because a config line changed would be the wrong instinct — so the answer
+to "what is still on disk, and do I still want it?" is visible rather than
+merely true.
+
 Shut down with `podman compose down`, and come back with `podman compose up -d`
 — not `start`; see [Stopping and starting](#stopping-and-starting). Host storage
 survives either way; see [Starting over](#starting-over).
@@ -228,6 +242,11 @@ the app:
 <data root>/<name>/     persistent data the app owns
 <log root>/<name>/      logs it writes
 ```
+
+Uninstalling an app leaves its directories alone, so nothing is lost by taking a
+feature out of the app list and putting it back. `/_status` lists what is left
+behind under `unclaimed`, so retired data stays visible instead of merely
+present.
 
 Resolve them with `podpack.paths.data_dir()` and `log_dir()`, which default to
 the app handling the current request. An app never builds these paths itself, so
