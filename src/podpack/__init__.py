@@ -74,10 +74,12 @@ def create_app(
     db.init_app(app)
     _add_template_fallback(app)
 
-    from .core import core_blueprint
+    from .core import core_blueprint, install_home_page
 
     app.register_blueprint(core_blueprint)
     install_apps(app, installed_apps(host_config))
+    # After the apps, so an app that routes `/` keeps it; see install_home_page.
+    install_home_page(app)
 
     @app.context_processor
     def _nav():

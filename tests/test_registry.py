@@ -74,6 +74,49 @@ def test_site_can_mount_an_app_where_it_likes(site):
     assert app.extensions["podpack"].apps["notes"].url_prefix == "/writing/notes"
 
 
+FRONT_PAGE_APP = '''
+from flask import Blueprint
+from podpack import SiteApp
+
+blueprint = Blueprint("front", __name__)
+
+
+@blueprint.route("/")
+def index():
+    return "THE SITE'S OWN FRONT PAGE"
+
+
+site_app = SiteApp(blueprint=blueprint, url_prefix=None)
+'''
+
+
+def test_an_app_may_claim_the_site_root(site, app_package):
+    """`/` belongs to the site, not to the framework.
+
+    podpack serves a default front page so that a site with no apps shows
+    something rather than 404. It used to register that unconditionally, which
+    meant an app routing `/` lost silently -- both rules existed and Werkzeug
+    matched whichever was added first, which was always podpack's.
+    """
+    app_package("front_page_app", FRONT_PAGE_APP)
+    app = site(
+        host_config={
+            "site": {"name": "s", "environment": "test", "apps": ["front_page_app"]}
+        }
+    )
+
+    assert app.test_client().get("/").get_data(as_text=True) == "THE SITE'S OWN FRONT PAGE"
+    assert [r.endpoint for r in app.url_map.iter_rules() if str(r.rule) == "/"] == ["front.index"]
+
+
+def test_the_default_front_page_is_there_when_nothing_claims_it(site):
+    """A site with no apps is a valid site and should not 404 on its own root."""
+    app = site(host_config={"site": {"name": "bare", "environment": "test", "apps": []}})
+
+    body = app.test_client().get("/").get_data(as_text=True)
+    assert "No apps are installed yet" in body
+
+
 def test_data_left_by_an_uninstalled_app_is_reported(app):
     """Uninstalling keeps an app's data, so something has to say it is there.
 

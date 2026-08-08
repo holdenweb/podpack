@@ -85,6 +85,31 @@ def site_package(tmp_path):
 
 
 @pytest.fixture
+def app_package(tmp_path):
+    """Create an importable single-module podpack app with the given source.
+
+    Cheaper and clearer than shipping a second fixture app in the repository,
+    and it lets a test install something that `podpack_notes` deliberately is
+    not -- an app mounted at the site root, say.
+    """
+    created = []
+
+    def _make(name, source):
+        (tmp_path / f"{name}.py").write_text(source)
+        created.append(name)
+        if str(tmp_path) not in sys.path:
+            sys.path.insert(0, str(tmp_path))
+        return name
+
+    yield _make
+
+    for name in created:
+        sys.modules.pop(name, None)
+    if str(tmp_path) in sys.path:
+        sys.path.remove(str(tmp_path))
+
+
+@pytest.fixture
 def app(site):
     return site()
 

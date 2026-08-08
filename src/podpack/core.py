@@ -1,9 +1,12 @@
 """The routes every site has, whatever apps it installs.
 
-Deliberately three and no more. A home page so that a site with no apps still
-serves something; a health endpoint because the container healthcheck needs one;
-and a status report because the whole point of the container substrate is being
-able to see, from outside, whether the mounts and grants are actually right.
+Two of them unconditionally: a health endpoint, because the container healthcheck
+needs one, and a status report, because the whole point of the container
+substrate is being able to see from outside whether the mounts and grants are
+right. Both live under names a site is unlikely to want.
+
+The third is `/`, and it is a *fallback* rather than a fixture -- see
+`install_home_page`. A site's front page belongs to the site.
 """
 
 import os
@@ -18,9 +21,29 @@ from .paths import unclaimed
 core_blueprint = Blueprint("podpack", __name__)
 
 
-@core_blueprint.route("/")
-def home():
-    return render_template("index.html", title=current_app.extensions["podpack"].host_config["site"]["name"])
+def install_home_page(app):
+    """Serve a default front page, but only if nothing else wants `/`.
+
+    A site with no apps is a perfectly valid site and should show something
+    rather than 404, which is why this exists at all. But `/` is the most
+    valuable address a site has, and the framework holding it permanently would
+    contradict the rule that the shape of the address space belongs to the site
+    (ADR-0006). Registering it unconditionally did exactly that: an app that also
+    routed `/` lost silently, because both rules existed and Werkzeug matched
+    whichever was added first, which was always podpack's.
+
+    Called after the apps are installed, so "wants it" means any rule they added.
+    A site registering its own `/` after `create_app` returns is too late for
+    this check -- its front page belongs in an app, which is where its templates
+    and its nav entry already live.
+    """
+    if any(str(rule.rule) == "/" for rule in app.url_map.iter_rules()):
+        return
+
+    @app.route("/")
+    def home():
+        state = app.extensions["podpack"]
+        return render_template("index.html", title=state.host_config["site"]["name"])
 
 
 @core_blueprint.route("/healthz")
