@@ -628,6 +628,49 @@ In this file a mismatch mostly fails loudly instead: `COPY --from=builder
 /app/.venv` cannot find its source and the build stops. Only changing both paths
 to *different* values produces the broken image above.
 
+## Deploying to Opalstack
+
+Opalstack's AlmaLinux 9 servers run rootless podman, so this suite deploys there
+essentially as it stands. The mapping:
+
+| Opalstack gives you | goes in |
+| --- | --- |
+| an **Nginx Proxy Port** app's port assignment | `WEB_HOST_PORT` in `.env` |
+| the app directory `~/apps/<name>/` | `HOST_DATA_DIR`, `HOST_LOG_DIR` in `.env` |
+| the site domain | `base_url` in `config/app.toml` |
+
+That is the whole of it, which is the point: the port a managed host allocates is
+exactly the kind of per-host fact `.env` exists for. Opalstack generates the
+nginx upstream to proxy your site to that port, so nothing above the container
+needs to know it.
+
+Two things to watch, neither of them podpack's doing:
+
+- **`podman-compose` is what their tutorial uses, and it will not honour this
+  suite's ordering.** See [Compose front-ends](#compose-front-ends): the
+  `depends_on` gates are load-bearing here and it ignores them. Use `podman
+  compose` with the Compose v2 provider, or sequence the phases by hand.
+- **`loginctl enable-linger <uid>`** is needed for containers to keep running
+  when you are not logged in; their tutorial mentions it in passing.
+
+`base_url` is the site's public URL — `https://example.com`, with **no port**.
+The allocated port is where the container listens, not how the world addresses
+the site, and the two are only ever the same number in a lab.
+
+### Using the managed PostgreSQL instead
+
+Opalstack provides a managed PostgreSQL 17, the same version this suite runs in a
+container. Swapping to it is deliberately small, because podpack learns about the
+database *only* from `SQLALCHEMY_DATABASE_URI`: drop the `postgres` service, its
+two `init-storage` mounts and the `db-init/` mount, and repoint the URI. No
+application code and no migration changes.
+
+Worth knowing what it costs, though. A container pins `postgres:17` per
+deployment and upgrades when you decide; the managed instance is the server's,
+shared with everything else on it, and moves when the host moves. Keeping the
+container is the same instinct as mounting the config read-only — the version
+belongs to version control rather than to the machine.
+
 ## Running on Linux
 
 Two differences on a real Linux host:
@@ -643,13 +686,32 @@ Two differences on a real Linux host:
 
 ## Compose front-ends
 
-Both work:
+**They are not interchangeable, and this suite needs `podman compose`.**
 
-- `podman compose` — delegates to Docker Compose v2 if installed, which has the
-  most complete support for `depends_on` conditions. Recommended.
-- `podman-compose` — also works. It names containers with underscores
-  (`holdenweb-lab-pg_web_1`) rather than hyphens, so don't mix the two
-  front-ends against the same project without taking the stack down first.
+- `podman compose` — delegates to Docker Compose v2, which honours `depends_on`
+  conditions. **Required**, because every ordering guarantee here rests on them.
+- `podman-compose` — starts the containers but **silently ignores
+  `depends_on` conditions.** It also names containers with underscores
+  (`holdenweb-lab-pg_web_1`) rather than hyphens, so never point the two
+  front-ends at the same project without taking the stack down first.
+
+The difference is not theoretical. The same file, one service sleeping five
+seconds and a second gated on its completion:
+
+```console
+podman-compose:   ONCE-START 626   AFTER-START 626   ONCE-END 631   # gate ignored
+podman compose:   ONCE-START 633   ONCE-END 638      AFTER-START 638  # gate honoured
+```
+
+Under `podman-compose` three guarantees quietly disappear: `init-storage` no
+longer precedes the servers, so the bind-mount ownership problem returns; `web`
+no longer waits for `migrate`, so the site can start against a schema that has
+not been created; and it no longer waits for PostgreSQL to be accepting
+connections. Nothing reports any of this — the stack simply comes up, and works
+or does not depending on timing.
+
+An earlier version of this file said `podman-compose` "also works". It was
+inherited from the original lab and had never been tested.
 
 ## Development
 

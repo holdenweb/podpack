@@ -158,7 +158,13 @@ services:
       - ${HOST_LOG_DIR}/apps:/var/log/holdenweb/apps
       - ./config/app.toml:/etc/holdenweb/app.toml:ro
     ports:
-      - "127.0.0.1:${WEB_HOST_PORT}:8000"
+      # The external port is the one thing a host gets to dictate: Opalstack
+      # allocates it to an "Nginx Proxy Port" application and proxies the site
+      # to it, so deploying there is an edit of WEB_HOST_PORT in .env and
+      # nothing else. The address is settable too, because their own example
+      # publishes on all interfaces while a lab is better off on loopback --
+      # so which one is right belongs to the host, not to this file.
+      - "${WEB_BIND_ADDR:-127.0.0.1}:${WEB_HOST_PORT}:8000"
     depends_on:
       init-storage:
         condition: service_completed_successfully

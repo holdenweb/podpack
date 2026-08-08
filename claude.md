@@ -156,6 +156,18 @@ Verified on a clean slate: host storage deleted, cluster re-initialised,
 bootstrap re-run, and the migration creating the schema on PostgreSQL before the
 site came up.
 
+**Opalstack takes this suite as it stands.** Their AlmaLinux 9 servers run
+rootless podman; an "Nginx Proxy Port" application hands you a port assignment
+and a directory under `~/apps/`, which become `WEB_HOST_PORT` and the host roots
+in `.env`, and their nginx proxies the site to that port. So the external port is
+one line of per-host config, which is what `.env` is for. Two traps: their own
+tutorial uses `podman-compose`, which ignores this suite's ordering gates
+(gotcha 4), and containers need `loginctl enable-linger` to outlive a logout.
+They also offer a managed PostgreSQL 17 — Steve's call (2026-08-07) is to keep
+the container, since a pinned `postgres:17` upgrades when the site decides rather
+than when the server does. Switching later is small: podpack learns about the
+database only from `SQLALCHEMY_DATABASE_URI`.
+
 ### Gotchas already paid for — do not rediscover these
 
 1. **Bind-mount ownership.** Servers drop to unprivileged uids (999 for
@@ -173,28 +185,35 @@ site came up.
    inline `python -c "..."` probe arrives mangled and dies with a SyntaxError.
    Use a script file — `container/healthcheck.py`. Only shows up under the
    Compose v2 provider, not `podman-compose`.
-4. **A PostgreSQL config file outside the data directory means initdb's
+4. **`podman-compose` silently ignores `depends_on` conditions**, and every
+   ordering guarantee here rests on them — so it is not an alternative front
+   end, it is a broken one. Measured: a service gated on another's completion
+   started in the same second rather than waiting five. Under it, `init-storage`
+   stops preceding the servers (gotcha 1 returns), `web` stops waiting for
+   `migrate`, and nothing waits for PostgreSQL. Matters because Opalstack's own
+   container tutorial uses `podman-compose`.
+5. **A PostgreSQL config file outside the data directory means initdb's
    generated one is ignored entirely** — so `hba_file` and `ident_file` must be
    named explicitly, and all three files mounted together. Upside:
    `ALTER SYSTEM` fails by design, keeping config in version control.
-5. **`pg_isready` needs `-U` and `-d`** in the healthcheck, or it reports the
+6. **`pg_isready` needs `-U` and `-d`** in the healthcheck, or it reports the
    server ready before the bootstrap has created the application's database.
-6. **`pg_ctl reload` must run as `-u postgres`**; it refuses to run as root.
-7. **Ports on this machine.** 8456 is the real site's local port; 5432 is a
+7. **`pg_ctl reload` must run as `-u postgres`**; it refuses to run as root.
+8. **Ports on this machine.** 8456 is the real site's local port; 5432 is a
    native `postgres`; 27017 is a native `mongod`. This suite uses 8458/5433, and
    the MongoDB lab 8457/27018.
-8. **Bootstrap scripts in `/docker-entrypoint-initdb.d` only run while the data
+9. **Bootstrap scripts in `/docker-entrypoint-initdb.d` only run while the data
    directory is empty** — and since it is on the host, that means "first time on
    this machine", not "each time the container is recreated". Re-arming means
    deleting the host data directory. App data seeding follows the same rule.
-9. **Apps live under an `apps/` level**, not beside `postgres/`, so the two
+10. **Apps live under an `apps/` level**, not beside `postgres/`, so the two
    chowns cannot reach each other. A single recursive chown of the data root
    would take the database's data directory with it and undo gotcha 2.
-10. **Do not give SQLAlchemy pool options it did not ask for.** SQLite's
+11. **Do not give SQLAlchemy pool options it did not ask for.** SQLite's
     StaticPool rejects `pool_size` outright, so podpack passes through only the
     keys the site actually set. Supplying defaults made it unable to run on
     SQLite at all.
-11. **A venv is tied to its absolute path, twice over.** Console-script shebangs
+12. **A venv is tied to its absolute path, twice over.** Console-script shebangs
     carry the interpreter path, and the project is installed into it as an
     editable pointing at `<workdir>/src`. So a moved venv gives both
     `gunicorn: not found` (exit 127, which reads like a PATH problem) *and*
@@ -205,24 +224,24 @@ site came up.
     - in the image, the two build stages must share a `WORKDIR`. Mostly this
       fails loudly, because `COPY --from=builder /app/.venv` cannot find its
       source; only setting both to *different* values yields the broken image.
-12. **Do not try to delete something out of an earlier image layer.** The layer
+13. **Do not try to delete something out of an earlier image layer.** The layer
     that added it still carries the files and the deletion only adds another on
     top, so the image grows. Not shipping it — a second stage — is the only way
     to not ship it.
-13. **`.dockerignore` patterns anchor to the context root.** A bare
+14. **`.dockerignore` patterns anchor to the context root.** A bare
     `__pycache__/` excludes nothing under `src/`; it needs `**/__pycache__`.
     Written the wrong way the file looks right, does nothing, and the image goes
     on shipping bytecode compiled on the laptop — including valid `.pyc` for
     migrations deleted long ago, which are loaded in preference to compiling the
     source actually present. Verify an ignore file by building and looking.
-14. **Framework source is baked into the image, so `restart` is not a rebuild.**
+15. **Framework source is baked into the image, so `restart` is not a rebuild.**
     Editing anything under `src/` and then restarting brings back the *previous*
     build: the site behaves like the last commit and nothing says why. Use
     `./scripts/up.sh`, which always rebuilds — about six seconds when nothing
     changed, since layers are content-addressed — and stamps the commit into the
     image, where `/_status` reports it as `build_commit`. Only mounted config
     (`config/*.toml`, `*.conf`) is a restart-only change.
-15. **Revisions are generated on the host, never in the container.**
+16. **Revisions are generated on the host, never in the container.**
     `/app/alembic/versions` is root-owned while the image runs as uid 10001, so
     `alembic revision --autogenerate` there does the whole comparison and dies
     on the final write; and `--rm` would discard the file anyway. Code being
@@ -326,6 +345,9 @@ site layer that overrides everything below.
   (`/home/sholden/apps/second-alma/`). Those should be relative to a
   configuration parameter — perhaps an application name — that a `deploy`
   utility helps establish, so sites can be deployed as Opalstack apps on demand.
+  Possibly moot for a podpack site: containers are now available on Opalstack, so
+  the deployment can be the compose stack rather than uwsgi at all (§4). Worth
+  settling before doing path-parameterisation work that may not be needed.
 - **Is content core or a plugin?** Still open. Easier to answer once `hwpdf` is
   installed and there are two apps to compare.
 
