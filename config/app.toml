@@ -7,6 +7,14 @@
 [site]
 name = "holdenweb.com (podman PostgreSQL lab)"
 environment = "local"
+# The address the *world* uses, for links that have to be absolute and are
+# built with no request to take a Host header from -- mail sent from a job, a
+# feed, a CLI command. Read with `podpack.absolute_url()`.
+#
+# On a proxied host this is nothing like where the container listens: Opalstack
+# serves https://example.com/ and forwards to some allocated high port. The two
+# are the same number only in a lab, as here. A value with no scheme and host
+# is a boot failure, because `urljoin` turns one into a link nothing can follow.
 base_url = "http://localhost:8458"
 
 # The site's installed apps, in the order they are installed. This list is what

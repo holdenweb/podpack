@@ -8,9 +8,9 @@ mechanism.
 from dataclasses import replace
 
 import pytest
-from flask import Blueprint
+from flask import Blueprint, url_for
 
-from podpack import Section, SiteApp, app_config, create_app, db
+from podpack import Section, SiteApp, absolute_url, app_config, create_app, db
 from podpack.paths import data_dir, unclaimed
 
 
@@ -75,7 +75,7 @@ def test_site_can_mount_an_app_where_it_likes(site):
 
 
 FRONT_PAGE_APP = '''
-from flask import Blueprint
+from flask import Blueprint, url_for
 from podpack import SiteApp
 
 blueprint = Blueprint("front", __name__)
@@ -115,6 +115,55 @@ def test_the_default_front_page_is_there_when_nothing_claims_it(site):
 
     body = app.test_client().get("/").get_data(as_text=True)
     assert "No apps are installed yet" in body
+
+
+def test_absolute_url_works_outside_a_request(site):
+    """The gap `base_url` exists to fill.
+
+    Inside a request Flask builds an external URL from the `Host` header and
+    needs no configuration. Outside one it raises, which is where mail from a
+    job, a feed, or a CLI command lands.
+    """
+    app = site(
+        host_config={
+            "site": {
+                "name": "s",
+                "environment": "test",
+                "apps": ["podpack_notes"],
+                "base_url": "https://example.com",
+            }
+        }
+    )
+    with app.app_context():
+        assert absolute_url("notes.index") == "https://example.com/notes/"
+        with pytest.raises(RuntimeError):
+            url_for("notes.index", _external=True)
+
+
+def test_absolute_url_falls_back_to_the_request(site):
+    """A site need not set `base_url`; in a request Flask already knows."""
+    app = site()
+    with app.test_request_context("/", base_url="https://asked-for.example"):
+        assert absolute_url("notes.index") == "https://asked-for.example/notes/"
+
+
+def test_a_base_url_that_cannot_be_joined_to_is_a_boot_failure(site):
+    """`urljoin('example.com', '/x')` is `/x` -- a link nothing can follow.
+
+    Silently useless is the worst outcome for a value whose only job is to be
+    pasted into mail, so the scheme-less case is caught at boot instead.
+    """
+    with pytest.raises(RuntimeError, match="no scheme and host"):
+        site(
+            host_config={
+                "site": {
+                    "name": "s",
+                    "environment": "test",
+                    "apps": [],
+                    "base_url": "example.com",
+                }
+            }
+        )
 
 
 def test_data_left_by_an_uninstalled_app_is_reported(app):

@@ -19,11 +19,14 @@ from jinja2 import ChoiceLoader, PackageLoader
 from .config import app_config, installed_apps, load_host_config, require_env
 from .nav import Section, sections
 from .registry import PodpackState, SiteApp, install_apps
+from .urls import absolute_url, base_url, check_base_url
 
 __all__ = [
     "Section",
     "SiteApp",
+    "absolute_url",
     "app_config",
+    "base_url",
     "create_app",
     "db",
     "sections",
@@ -58,6 +61,7 @@ def create_app(
     """
     if host_config is None:
         host_config = load_host_config(config_path)
+    check_base_url(host_config)
 
     app = Flask(site_package or __name__)
 

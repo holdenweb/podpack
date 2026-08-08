@@ -271,9 +271,6 @@ database only from `SQLALCHEMY_DATABASE_URI`.
 
 - The MongoDB lab is still untracked inside the `holdenweb.com` working tree.
   Move it or delete it.
-- `config/app.toml` declares `base_url` and nothing reads it. Under single-site
-  that is a meaningful setting (canonical URL for mail and feeds) — so wire it
-  up or drop it.
 - **An app upgrade process, deliberately deferred.** Installing an app is
   handled; upgrading one to a version whose expectations have changed is not.
   Two known gaps, both harmless today because no app yet ships data:
