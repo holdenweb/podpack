@@ -27,6 +27,10 @@ elsewhere: one `db.metadata`, one alembic history, and one app list to reason
 about, rather than a registry keyed by hostname and a migration story per
 tenant.
 
+This README says how to use podpack. For **why it is the way it is** — what
+forced each choice, what it cost, and what was rejected — see the
+[architectural decision records](adrs/adr/README.md).
+
 The container suite is arranged so that **no state and no host-specific setting
 lives inside a container**: persistent state is bind-mounted from
 `$HOST_DATA_DIR`, host-specific configuration read-only from `./config`, and

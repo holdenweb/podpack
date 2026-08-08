@@ -43,10 +43,13 @@ class SiteApp:
     blueprint: Blueprint
     url_prefix: str | None = None
     """Where the app asks to be mounted, and only asks: a site that wants it
-    elsewhere in its address space says so with `url_prefix` in the app's own
-    config section, and the registry mounts it there instead. `None` mounts at
-    the site root. Nav entries need no adjustment either way, because they name
-    endpoints rather than paths."""
+    elsewhere in its address space says so in `[site.mounts]`, keyed by app
+    name, and the registry mounts it there instead. `None` mounts at the site
+    root. Nav entries need no adjustment either way, because they name
+    endpoints rather than paths.
+
+    The site's table and not the app's own config section, because where an app
+    lands is a decision the app takes no part in; see ADR-0006."""
 
     nav: tuple[Section, ...] = ()
 

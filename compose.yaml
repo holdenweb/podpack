@@ -184,7 +184,7 @@ services:
     healthcheck:
       # A script, not a `python -c` one-liner: podman splits ["CMD", ...]
       # arguments on whitespace, so any argument containing spaces arrives
-      # mangled. See app/healthcheck.py.
+      # mangled. See container/healthcheck.py.
       test: ["CMD", "python", "/app/healthcheck.py"]
       interval: 10s
       timeout: 5s

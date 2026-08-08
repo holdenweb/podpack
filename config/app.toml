@@ -1,7 +1,8 @@
 # Host-specific site configuration, bind-mounted read-only at
 # /etc/holdenweb/app.toml. Anything that varies between laptop, staging and
 # production but is *not* a secret belongs here; secrets stay in the
-# environment (.env). Edit and `podman compose restart web` to apply.
+# environment, via secrets.env. Edit and `podman compose restart web` to
+# apply -- but note that changes under src/ need a rebuild, not a restart.
 
 [site]
 name = "holdenweb.com (podman PostgreSQL lab)"

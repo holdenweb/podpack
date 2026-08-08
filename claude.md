@@ -41,6 +41,12 @@ Guardrail carried over from the earlier sessions and still in force: **do not
 change anything outside the current working directory without asking first.**
 Reading is fine.
 
+**Before reopening a settled question, read [the decision
+records](adrs/adr/README.md).** This brief says where the project is up to and
+the README says how to use it; the ADRs say why each choice was made, what it
+cost, and what was already rejected. They are immutable — a changed decision
+gets a new record superseding the old, never an edit.
+
 ---
 
 ## 3. podpack: what now exists
@@ -125,7 +131,7 @@ answer if this ever gets painful enough to justify multiple heads.
 
 ### Tests
 
-`uv run pytest` — 13 tests covering what the registry promises: the app list
+`uv run pytest` — 23 tests covering what the registry promises: the app list
 being configuration rather than code, models reaching `db.metadata`, template
 namespacing and site override, seeding once and re-arming, and the migration
 environment needing no Flask app.
