@@ -33,7 +33,7 @@ by hostname. Do not add `SERVER_NAME` handling or a site registry.
 
 | Directory | What it is | State |
 | --- | --- | --- |
-| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 13 commits, working |
+| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 23 commits, working |
 | `~/sites/pp-pdf` | the PDF tools as a standalone installable package | 20 commits; **reconciled** — installs as a podpack app and still works as a plain blueprint (§5) |
 | `~/sites/holdenweb.com` | the original Flask site | untouched; **not yet adapted** — see §6 |
 
@@ -42,7 +42,7 @@ change anything outside the current working directory without asking first.**
 Reading is fine.
 
 **Before reopening a settled question, read [the decision
-records](adrs/adr/README.md).** This brief says where the project is up to and
+records](adrs/README.md).** This brief says where the project is up to and
 the README says how to use it; the ADRs say why each choice was made, what it
 cost, and what was already rejected. They are immutable — a changed decision
 gets a new record superseding the old, never an edit.

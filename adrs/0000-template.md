@@ -44,7 +44,7 @@ trigger to watch for), `Rejected`, `Superseded by ADR-nnnn`.
 | --- | --- | --- |
 | `README.md` | how do I use it? | the interface does |
 | `claude.md` | where is the project up to? | the work does |
-| `adrs/adr/` | why is it like this? | never — superseded instead |
+| `adrs/` | why is it like this? | never — superseded instead |
 
 **Date** is when the record was written, not when the decision was taken.
 ADR-0001 to ADR-0023 were all written on 2026-08-08, reconstructing decisions

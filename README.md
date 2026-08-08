@@ -29,7 +29,7 @@ tenant.
 
 This README says how to use podpack. For **why it is the way it is** — what
 forced each choice, what it cost, and what was rejected — see the
-[architectural decision records](adrs/adr/README.md).
+[architectural decision records](adrs/README.md).
 
 The container suite is arranged so that **no state and no host-specific setting
 lives inside a container**: persistent state is bind-mounted from
