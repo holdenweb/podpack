@@ -6,11 +6,18 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$here"
 
-if [[ ! -f .env ]]; then
-    cp .env.example .env
-    echo "created .env from .env.example -- review it before going further"
-fi
+# Two files, split by what restoring them means. `.env` is per-host and expected
+# to be edited; `secrets.env` must be restored verbatim from a backup, and
+# generating a fresh one is only right for a site that has no data yet.
+for f in .env secrets.env; do
+    if [[ ! -f "$f" ]]; then
+        cp "${f}.example" "$f"
+        echo "created ${f} from ${f}.example -- review it before going further"
+    fi
+done
 
+# Only .env is sourced here: this script needs the host paths and nothing else,
+# and reading credentials it has no use for would be gratuitous.
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 

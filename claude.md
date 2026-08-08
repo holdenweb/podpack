@@ -136,7 +136,20 @@ environment needing no Flask app.
 
 No state and no host-specific setting lives inside a container: persistent state
 bind-mounted from `$HOST_DATA_DIR`, host config read-only from `./config`,
-secrets through the environment. Promotion to a real host is an edit of `.env`.
+secrets through the environment.
+
+**Two environment files, split by what a restore does to them rather than by
+secrecy.** `.env` holds what is *expected* to change on a new host — paths,
+ports, `SITE_NAME`, worker count — and is the file you edit. `secrets.env` holds
+what must come back *verbatim* — credentials, `SECRET_KEY`, the database name
+and roles — and is the file you never open. Mixing them was what made restoring
+require hand-editing a copy of a backup, a manual step in the one procedure that
+should have none. Only `.env` is read for substitution, so `compose.yaml` refers
+to no credential; note that `podman compose config` still expands `env_file`
+contents, so its output is as sensitive as `secrets.env`.
+
+`SITE_NAME` also names the compose project and the image, so two sites on one
+host cannot collide. Distinct ports are still needed for a second site.
 
 `init-storage` → `postgres` (waits healthy) → `migrate` → `web`.
 

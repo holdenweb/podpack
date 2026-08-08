@@ -38,8 +38,12 @@ secrets arrive through the environment. Promotion to a real host is an edit of
 From the root of this repository:
 
 ```bash
-./scripts/prepare-host-dirs.sh && podman compose up -d --build
+./scripts/prepare-host-dirs.sh && ./scripts/up.sh
 ```
+
+The first creates `.env` and `secrets.env` from their examples, with working lab
+values, and makes the host directories. The second always rebuilds — see
+[Changing things](#changing-things) for why that is the safe default.
 
 Then visit <http://localhost:8458/>, or ask the site where it keeps its state:
 
@@ -373,7 +377,8 @@ is reachable from the network. Change them in `.env` if they still clash.
 | Client authentication | `config/pg_hba.conf` | `/etc/postgresql/pg_hba.conf` (ro) |
 | Username mapping | `config/pg_ident.conf` | `/etc/postgresql/pg_ident.conf` (ro) |
 | Site settings | `config/app.toml` | `/etc/holdenweb/app.toml` (ro) |
-| Secrets and wiring | `.env` | environment variables |
+| Per-host wiring | `.env` | environment variables |
+| Credentials | `secrets.env` | environment variables |
 
 `HOST_DATA_DIR` and `HOST_LOG_DIR` default to `./hostdata` and `./hostlogs`
 (both gitignored) so the suite is self-contained. On a real host they become
@@ -383,6 +388,44 @@ to change.
 Apps live under an `apps/` level rather than beside `postgres/` so that the two
 ownership fixes cannot reach each other: a single recursive chown of the data
 root would take the database's data directory with it.
+
+### Why there are two environment files
+
+They are split by **what restoring them means**, not by secrecy:
+
+| | `.env` | `secrets.env` |
+| --- | --- | --- |
+| Contains | paths, ports, site name, worker count | credentials, `SECRET_KEY`, database identity |
+| On a new host | **edit it** — that is what it is for | **put it back verbatim** |
+| If it changes | nothing is lost | sessions void, or the site cannot reach its own data |
+
+Mixing them is what made restoring a manual step: the backup had to be
+hand-edited before it could be used, in exactly the procedure that should have
+none. A restore is now *copy `secrets.env`, edit `.env`* — and the file you must
+not touch is the one you never open.
+
+Only `.env` is read for variable substitution, so `compose.yaml` never refers to
+a credential and stays safe to commit and to read. `podman compose config` is the
+exception worth knowing: it expands `env_file` contents into the environment it
+prints, so treat its output as being as sensitive as `secrets.env` itself.
+
+### The site names its own containers
+
+`SITE_NAME` in `.env` gives the compose project and the image their names:
+
+```console
+$ podman ps --format '{{.Names}}'
+holdenweb-lab-postgres-1
+holdenweb-lab-web-1
+```
+
+So two sites on one host cannot collide, and `podman ps` says which is which
+instead of showing two identically-named sets. A second site needs distinct
+**ports** as well — `WEB_HOST_PORT` and `POSTGRES_HOST_PORT` are per-deployment,
+and a clash fails at bind time with `address already in use`.
+
+Keep `SITE_NAME` in step with `name` in `config/app.toml`. Compose cannot read
+TOML, which is the only reason the site's name is written twice.
 
 ### Why the data directory is a sub-directory
 
@@ -516,8 +559,8 @@ podman compose exec postgres psql -U labadmin -d holdenweb
 ```
 
 `holdenweb_app` is the *application* role: it can log in, connect to one
-database, and owns one schema. The admin credentials in `.env` are used exactly
-once, by the bootstrap below, and are never given to the app.
+database, and owns one schema. The superuser credentials in `secrets.env` are
+used exactly once, by the bootstrap below, and are never given to the app.
 
 ## First-run bootstrap
 

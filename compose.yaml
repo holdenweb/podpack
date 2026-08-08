@@ -1,4 +1,4 @@
-name: holdenweb-lab-pg
+name: ${SITE_NAME:-podpack}
 
 # The PostgreSQL lab. Same principle as its MongoDB sibling (which stayed in the
 # holdenweb.com working tree when this one moved out): a Flask app plus a
@@ -7,7 +7,17 @@ name: holdenweb-lab-pg
 #
 #   * persistent state  -> bind-mounted from ${HOST_DATA_DIR} on the host
 #   * host-specific cfg -> bind-mounted read-only from ./config
-#   * secrets / wiring  -> environment, via .env
+#   * per-host wiring   -> .env, the file you edit when the site moves
+#   * credentials       -> secrets.env, restored verbatim and never edited
+#
+# The two environment files are split by what a restore does to them, not by
+# secrecy: .env is expected to change on a new host, secrets.env must not. Only
+# .env is read for substitution, so nothing below refers to a credential and
+# this file stays safe to commit and to read.
+#
+# `podman compose config` is a different matter -- it expands env_file contents
+# into the environment it prints, credentials and all. Do not paste its output
+# anywhere you would not paste secrets.env itself.
 #
 # Unlike its Mongo sibling, this one mirrors the real holdenweb stack:
 # Flask-SQLAlchemy over psycopg2, connecting with SQLALCHEMY_DATABASE_URI.
@@ -47,13 +57,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+      - secrets.env
     environment:
-      # Consumed once, by the image's first-run bootstrap, to create the
-      # superuser and the database. The application never uses these; see
-      # db-init/ for the least-privileged role it does use.
-      POSTGRES_USER: ${POSTGRES_ADMIN_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      # POSTGRES_USER/PASSWORD/DB arrive from secrets.env, which is where the
+      # image looks for them -- so no credential is interpolated here.
+      #
       # A sub-directory of the mount, not the mount point itself. PostgreSQL
       # refuses to start unless its data directory is mode 0700, and a bind
       # mount point's permissions are decided by the host (on macOS virtiofs
@@ -91,7 +99,7 @@ services:
     healthcheck:
       # -U/-d matter: without them pg_isready reports the *server* is up before
       # the bootstrap has finished creating the application's database.
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_ADMIN_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -114,12 +122,13 @@ services:
         # Stamped into the image and reported by /_status, so "is this running
         # my code?" has an exact answer. scripts/up.sh supplies it.
         GIT_SHA: ${GIT_SHA:-unknown}
-    image: localhost/holdenweb-lab-pg-web:latest
+    image: localhost/${SITE_NAME:-podpack}-web:latest
     restart: "no"
     env_file:
       - .env
+      - secrets.env
     environment:
-      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # SQLALCHEMY_DATABASE_URI comes from secrets.env.
       PODPACK_CONFIG: /etc/holdenweb/app.toml
     volumes:
       - ./config/app.toml:/etc/holdenweb/app.toml:ro
@@ -136,15 +145,15 @@ services:
         # Stamped into the image and reported by /_status, so "is this running
         # my code?" has an exact answer. scripts/up.sh supplies it.
         GIT_SHA: ${GIT_SHA:-unknown}
-    image: localhost/holdenweb-lab-pg-web:latest
+    image: localhost/${SITE_NAME:-podpack}-web:latest
     restart: unless-stopped
     env_file:
       - .env
+      - secrets.env
     environment:
-      # The same variable name the real application uses, so the app code does
-      # not have to know it is in a lab. `postgres` resolves on the compose
-      # network.
-      SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # SQLALCHEMY_DATABASE_URI comes from secrets.env -- the same variable
+      # name the real application uses, so the app code never has to know it is
+      # in a lab.
       PODPACK_CONFIG: /etc/holdenweb/app.toml
       # Roots, not per-app directories. podpack creates a subdirectory of each
       # for every installed app, so nothing here changes when the app list

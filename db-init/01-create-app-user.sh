@@ -9,7 +9,7 @@ set -euo pipefail
 
 echo "creating application role '${POSTGRES_APP_USER}' in database '${POSTGRES_DB}'"
 
-psql --username "${POSTGRES_ADMIN_USER}" --dbname "${POSTGRES_DB}" \
+psql --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" \
      --set ON_ERROR_STOP=1 --no-password <<-SQL
 	CREATE ROLE ${POSTGRES_APP_USER} LOGIN PASSWORD '${POSTGRES_APP_PASSWORD}';
 	GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO ${POSTGRES_APP_USER};
