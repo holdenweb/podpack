@@ -19,8 +19,10 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$here"
 
-if git rev-parse --git-dir >/dev/null 2>&1; then
-    sha="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+# A repository with no commits yet has no HEAD, so both of these fail and the
+# stamp used to come out "unknown-dirty" -- which reads as a state rather than
+# as the absence of one. A brand-new site hits that on its very first build.
+if sha="$(git rev-parse --short HEAD 2>/dev/null)"; then
     git diff --quiet HEAD 2>/dev/null || sha="${sha}-dirty"
 else
     sha="unknown"
