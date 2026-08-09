@@ -68,7 +68,7 @@ def app_config(name: str | None = None) -> dict[str, Any]:
     touching another and without the framework having to know what any of the
     settings mean:
 
-        [apps.notes]
+        [apps.myapp]
         page_size = 20
 
     `name` defaults to the app handling the current request, so view code can

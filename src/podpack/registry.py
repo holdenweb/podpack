@@ -9,12 +9,12 @@ this module adds, and the whole of it.
 An app is a package exposing a single module-level `site_app`:
 
     from podpack import Section, SiteApp
-    from .views import blueprint      # Blueprint("notes", __name__, ...)
+    from .views import blueprint      # Blueprint("myapp", __name__, ...)
 
     site_app = SiteApp(
         blueprint=blueprint,
-        url_prefix="/notes",
-        nav=(Section("Notes", "notes.index"),),
+        url_prefix="/myapp",
+        nav=(Section("My App", "myapp.index"),),
     )
 
 The app's name is its blueprint's name; see `SiteApp.name`. Everything else is
@@ -95,9 +95,9 @@ class PodpackState:
     installed_from: dict[str, str] = field(default_factory=dict)
     """App name to the import name it was installed from.
 
-    The two are routinely different -- `podpack_notes` is imported and answers
-    to `notes` -- because a distribution wants a namespaced name while an app
-    wants a short one to put in URLs, template paths and directories. Keeping
+    The two are routinely different -- a distribution wants a namespaced name
+    while an app wants a short one to put in URLs, template paths and
+    directories, so `podpack_myapp` may well answer to `myapp`. Keeping
     the mapping lets `/_status` report it, so which name a site should key
     `[site.mounts]` and `[apps.<name>]` on is answerable by looking rather than
     by getting it wrong first.

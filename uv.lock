@@ -510,11 +510,6 @@ dependencies = [
     { name = "psycopg2-binary" },
 ]
 
-[package.optional-dependencies]
-lab = [
-    { name = "podpack-notes" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
@@ -527,21 +522,14 @@ requires-dist = [
     { name = "flask", specifier = ">=3.0" },
     { name = "flask-sqlalchemy", specifier = ">=3.1.1" },
     { name = "gunicorn", specifier = ">=22.0" },
-    { name = "podpack-notes", marker = "extra == 'lab'", git = "https://github.com/holdenweb/podpack-notes.git" },
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
 ]
-provides-extras = ["lab"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.11" },
     { name = "pytest", specifier = ">=8.0" },
 ]
-
-[[package]]
-name = "podpack-notes"
-version = "0.1.0"
-source = { git = "https://github.com/holdenweb/podpack-notes.git#f8c5f3185c191dd1202a631d57c8fb9790a1180d" }
 
 [[package]]
 name = "psycopg2-binary"

@@ -16,7 +16,7 @@ from flask import current_app
 class Section:
     """One navigation entry.
 
-    `endpoint` is a Flask endpoint name -- `"notes.index"` -- and not a URL. The
+    `endpoint` is a Flask endpoint name -- `"myapp.index"` -- and not a URL. The
     chrome resolves it with `url_for` as it renders, which buys two things a
     literal path cannot. An entry follows its app when a site mounts that app
     somewhere other than where the app asked to be; and it cannot drift quietly

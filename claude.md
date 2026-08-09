@@ -34,7 +34,8 @@ by hostname. Do not add `SERVER_NAME` handling or a site registry.
 | Directory | What it is | State |
 | --- | --- | --- |
 | `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 23 commits, working |
-| `~/sites/podpack-notes` | the notes app, extracted so a site can install it from outside podpack | pushed; **the lab installs it from git** (§4) |
+| `~/sites/podpack-notes` | the notes app, in its own repository | pushed; installed by the demo site |
+| `~/sites/podpack-demo` | a site, and the worked output of following `creating-a-site.md` | installs podpack + podpack-notes from git |
 | `~/sites/pp-pdf` | the PDF tools as a standalone installable package | 20 commits; **reconciled** — installs as a podpack app and still works as a plain blueprint (§5) |
 | `~/sites/holdenweb.com` | the original Flask site | untouched; **not yet adapted** — see §6 |
 
@@ -158,23 +159,23 @@ contents, so its output is as sensitive as `secrets.env`.
 `SITE_NAME` also names the compose project and the image, so two sites on one
 host cannot collide. Distinct ports are still needed for a second site.
 
-**The lab installs an app from outside itself**, which is the one thing an
-in-tree app could never demonstrate. `podpack_notes` lives in
-`~/sites/podpack-notes` and reaches the image as the `lab` **extra**, fetched
-from git at build time — an extra rather than a dependency because a framework
-that forced an app on every site would be a strange framework.
+**This repository installs no app, and its lab's app list is empty.** podpack is
+a framework; a repository that installed an app would be a site. The lab still
+exercises everything underneath — containers, PostgreSQL, the migrate gate, the
+per-app roots, the two environment files — with nothing on top, and its alembic
+history is empty because the framework defines no models.
 
-Two things had to be true for that to resolve, and neither was obvious:
+The demonstration of installing an app lives in `~/sites/podpack-demo`, which is
+a site, and which was built by following [creating-a-site.md](creating-a-site.md)
+rather than by copying this repository — so building it tests the document.
 
-- **An app must not declare podpack as a dependency.** uv honours a git
-  dependency's own `[tool.uv.sources]`, so a sibling path in the app leaks into
-  the consumer's resolution (`has no subdirectory ../podpack`); and once
-  podpack installs the app, declaring podpack back gives uv two different URLs
-  for one package and it refuses outright. An app is loaded *by* podpack, so
-  podpack is there by construction. A site depends on both and says so itself.
-- **The Containerfile asks for the extra** (`uv sync --no-dev --extra lab`).
-  Without it `--no-dev` is not the thing that excludes the app; the extra simply
-  is not requested.
+One thing learned getting there, worth not rediscovering: **an app must not
+declare podpack as a dependency.** uv honours a git dependency's own
+`[tool.uv.sources]`, so a sibling path inside the app leaks into every
+consumer's resolution (`has no subdirectory ../podpack`), and naming podpack's
+git URL instead only moves the problem — a site then has two different URLs for
+podpack and uv refuses. An app is loaded *by* podpack, so podpack is present by
+construction; a site depends on both and says so in its own pyproject.
 
 `init-storage` → `postgres` (waits healthy) → `migrate` → `web`.
 

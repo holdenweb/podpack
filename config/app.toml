@@ -21,11 +21,12 @@ base_url = "http://localhost:8458"
 # a site mostly *is*: adding a feature is a line here and a restart, with no
 # code change, no rebuild and no change to compose.yaml. Order matters -- nav
 # entries appear in it, and an app's init may rely on an earlier app's service.
-# `podpack_notes` lives in its own repository and reaches this image as the
-# `lab` extra, fetched from git at build time. That is the point of listing it:
-# this line plus that extra are a site installing an app from outside itself,
-# which is the one thing an in-tree app could never demonstrate.
-apps = ["podpack_notes"]
+# Empty, and that is what this site is for. podpack is a framework, so its own
+# repository installs no app: a repository that installed one would be a site.
+# The demonstration of installing an app lives in ~/sites/podpack-demo, built by
+# following creating-a-site.md. This lab still exercises everything underneath —
+# containers, PostgreSQL, migrations, the per-app roots — with nothing on top.
+apps = []
 
 # Where the site chooses to mount an app, overruling the `url_prefix` the app
 # asks for. Only apps being moved need an entry. Site policy rather than app
@@ -33,12 +34,12 @@ apps = ["podpack_notes"]
 # has no part in the decision and never sees it.
 #
 # The key is the app's *name*, which is its blueprint's name, and that is not
-# always the import name above: `podpack_notes` is imported, and answers to
-# `notes`. Naming an app that is not installed is a boot failure rather than a
-# line that quietly does nothing.
+# always the import name above: a distribution wants a namespaced name while an
+# app wants a short one. Naming an app that is not installed is a boot failure
+# rather than a line that quietly does nothing.
 #
 # [site.mounts]
-# notes = "/writing/notes"
+# myapp = "/writing/myapp"
 
 [database]
 # Passed straight to SQLAlchemy's engine. The URI itself is a secret (it
@@ -54,6 +55,7 @@ echo = false
 max_upload_bytes = 1048576
 
 # Each installed app gets its own namespace, so a site can tune one without
-# touching another, and podpack never has to know what any of it means.
-[apps.notes]
-page_size = 20
+# touching another, and podpack never has to know what any of it means:
+#
+#   [apps.myapp]
+#   page_size = 20
