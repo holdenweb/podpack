@@ -25,15 +25,23 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "podpack"
 
-[dependency-groups]
-# podpack-notes is the lab site's app, not the framework's: it is what makes
-# this repository a working demonstration of installing an app from outside it.
+# The lab site's app, and an *extra* rather than a dependency: podpack is a
+# framework, so installing it must not force an app on anyone. Only the image
+# built from this repository asks for it, which is what makes this repository a
+# working demonstration of installing an app from outside itself.
+#
 # The test suite deliberately does not use it -- tests/fixture_app exists so
-# that podpack can be tested with nothing else checked out.
-dev = ["pytest>=8.0", "mypy>=1.11", "podpack-notes"]
+# podpack can be tested with nothing else checked out.
+[project.optional-dependencies]
+lab = ["podpack-notes"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "mypy>=1.11"]
 
 [tool.uv.sources]
-podpack-notes = { path = "../podpack-notes", editable = true }
+# git, not a path: a path source cannot be resolved inside a container build,
+# which fails with "Distribution not found at: file:///...".
+podpack-notes = { git = "https://github.com/holdenweb/podpack-notes.git" }
 
 [tool.mypy]
 # Annotations nobody checks are comments that look authoritative, so the

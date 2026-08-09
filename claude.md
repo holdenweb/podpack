@@ -34,7 +34,7 @@ by hostname. Do not add `SERVER_NAME` handling or a site registry.
 | Directory | What it is | State |
 | --- | --- | --- |
 | `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 23 commits, working |
-| `~/sites/podpack-notes` | the notes app, extracted so a site can install it from outside podpack | 1 commit; **not yet pushed** — see §4 |
+| `~/sites/podpack-notes` | the notes app, extracted so a site can install it from outside podpack | pushed; **the lab installs it from git** (§4) |
 | `~/sites/pp-pdf` | the PDF tools as a standalone installable package | 20 commits; **reconciled** — installs as a podpack app and still works as a plain blueprint (§5) |
 | `~/sites/holdenweb.com` | the original Flask site | untouched; **not yet adapted** — see §6 |
 
@@ -158,13 +158,23 @@ contents, so its output is as sensitive as `secrets.env`.
 `SITE_NAME` also names the compose project and the image, so two sites on one
 host cannot collide. Distinct ports are still needed for a second site.
 
-**The lab's app list is empty, and should not stay that way.** `podpack_notes`
-now lives in `~/sites/podpack-notes` — extracted so this repository can
-demonstrate a site installing an app from *outside* itself, which is the one
-thing an in-tree app could never show. It is a path dev-dependency, which local
-work resolves and a container build cannot: a path source fails there with
-`Distribution not found at: file:///...`. Push that repository and the lab
-becomes the demonstration, in two edits recorded in `config/app.toml`.
+**The lab installs an app from outside itself**, which is the one thing an
+in-tree app could never demonstrate. `podpack_notes` lives in
+`~/sites/podpack-notes` and reaches the image as the `lab` **extra**, fetched
+from git at build time — an extra rather than a dependency because a framework
+that forced an app on every site would be a strange framework.
+
+Two things had to be true for that to resolve, and neither was obvious:
+
+- **An app must not declare podpack as a dependency.** uv honours a git
+  dependency's own `[tool.uv.sources]`, so a sibling path in the app leaks into
+  the consumer's resolution (`has no subdirectory ../podpack`); and once
+  podpack installs the app, declaring podpack back gives uv two different URLs
+  for one package and it refuses outright. An app is loaded *by* podpack, so
+  podpack is there by construction. A site depends on both and says so itself.
+- **The Containerfile asks for the extra** (`uv sync --no-dev --extra lab`).
+  Without it `--no-dev` is not the thing that excludes the app; the extra simply
+  is not requested.
 
 `init-storage` → `postgres` (waits healthy) → `migrate` → `web`.
 

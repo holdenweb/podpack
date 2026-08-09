@@ -38,11 +38,11 @@ WORKDIR /app
 # Dependencies first, in their own layer keyed on the lockfile, so that editing
 # the source does not reinstall the world on every rebuild.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev --extra lab
 
 COPY src/ ./src/
 COPY README.md ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra lab
 
 
 FROM docker.io/library/python:3.12-slim
