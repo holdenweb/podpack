@@ -22,11 +22,11 @@ from podpack.paths import data_dir, unclaimed
 
 def test_app_list_is_configuration_not_code(site: SiteFactory) -> None:
     """Installing an app must be an edit to the config file and nothing else."""
-    with_notes = site()
+    with_widget = site()
     without = site(host_config={"site": {"name": "bare", "environment": "test", "apps": []}})
 
-    assert "notes.index" in with_notes.view_functions
-    assert "notes.index" not in without.view_functions
+    assert "widget.index" in with_widget.view_functions
+    assert "widget.index" not in without.view_functions
     assert without.extensions["podpack"].nav == []
 
 
@@ -37,18 +37,18 @@ def test_models_reach_metadata(app: Flask) -> None:
     app's tables have to be registered by the act of installing it. If this
     fails, migrations silently stop seeing the app.
     """
-    assert "notes" in db.metadata.tables
+    assert "widgets" in db.metadata.tables
 
 
 def test_nav_is_contributed_by_apps(app: Flask, client: FlaskClient) -> None:
-    assert app.extensions["podpack"].nav == [Section("Notes", "notes.index")]
+    assert app.extensions["podpack"].nav == [Section("Widget", "widget.index")]
     body = client.get("/").get_data(as_text=True)
     # Twice over: the header nav in base.html, and the installed-apps list in
     # index.html. Both are checked because an empty href is what a template
     # reading the wrong attribute off a Section produces -- Jinja renders an
     # Undefined as "" and says nothing -- so a link that silently goes nowhere
     # is the failure this pair is here to catch.
-    assert body.count('href="/notes/"') == 2
+    assert body.count('href="/widget/"') == 2
     assert 'href=""' not in body
 
 
@@ -64,20 +64,20 @@ def test_site_can_mount_an_app_where_it_likes(site: SiteFactory) -> None:
             "site": {
                 "name": "test site",
                 "environment": "test",
-                "apps": ["podpack_notes"],
-                "mounts": {"notes": "/writing/notes"},
+                "apps": ["fixture_app"],
+                "mounts": {"widget": "/writing/widget"},
             }
         }
     )
     client = app.test_client()
 
-    assert client.get("/writing/notes/").status_code == 200
-    assert client.get("/notes/").status_code == 404
+    assert client.get("/writing/widget/").status_code == 200
+    assert client.get("/widget/").status_code == 404
     # The nav follows without the app or the site restating anything, which is
     # the whole reason a Section holds an endpoint rather than a path.
-    assert 'href="/writing/notes/"' in client.get("/").get_data(as_text=True)
+    assert 'href="/writing/widget/"' in client.get("/").get_data(as_text=True)
     # And what /_status reports is where the app actually ended up.
-    assert app.extensions["podpack"].apps["notes"].url_prefix == "/writing/notes"
+    assert app.extensions["podpack"].apps["widget"].url_prefix == "/writing/widget"
 
 
 FRONT_PAGE_APP = '''
@@ -184,22 +184,22 @@ def test_absolute_url_works_outside_a_request(site: SiteFactory) -> None:
             "site": {
                 "name": "s",
                 "environment": "test",
-                "apps": ["podpack_notes"],
+                "apps": ["fixture_app"],
                 "base_url": "https://example.com",
             }
         }
     )
     with app.app_context():
-        assert absolute_url("notes.index") == "https://example.com/notes/"
+        assert absolute_url("widget.index") == "https://example.com/widget/"
         with pytest.raises(RuntimeError):
-            url_for("notes.index", _external=True)
+            url_for("widget.index", _external=True)
 
 
 def test_absolute_url_falls_back_to_the_request(site: SiteFactory) -> None:
     """A site need not set `base_url`; in a request Flask already knows."""
     app = site()
     with app.test_request_context("/", base_url="https://asked-for.example"):
-        assert absolute_url("notes.index") == "https://asked-for.example/notes/"
+        assert absolute_url("widget.index") == "https://asked-for.example/widget/"
 
 
 def test_a_base_url_that_cannot_be_joined_to_is_a_boot_failure(site: SiteFactory) -> None:
@@ -221,6 +221,21 @@ def test_a_base_url_that_cannot_be_joined_to_is_a_boot_failure(site: SiteFactory
         )
 
 
+def test_status_works_on_any_dialect(client: FlaskClient) -> None:
+    """The diagnostic must work before everything is right, not after.
+
+    It asks the server which database, role and schema the connection became --
+    PostgreSQL functions, so on SQLite the query fails. It used to take the
+    whole route down with it, which made /_status a 500 for the entire local
+    development half of the documented workflow.
+    """
+    body = client.get("/_status").get_json()
+    assert body["database_schema"].startswith("(not reported by sqlite")
+    # ...and the parts that do not depend on the dialect are all still there.
+    assert body["apps"]["widget"]["data_dir_writable"] is True
+    assert body["unclaimed"] == {"data": [], "logs": []}
+
+
 def test_data_left_by_an_uninstalled_app_is_reported(app: Flask) -> None:
     """Uninstalling keeps an app's data, so something has to say it is there.
 
@@ -238,7 +253,7 @@ def test_data_left_by_an_uninstalled_app_is_reported(app: Flask) -> None:
 
     assert unclaimed(state.data_root, state.apps) == ["retired_app", "stray.txt"]
     # ...and the installed app is still not mistaken for one of them.
-    assert "notes" not in unclaimed(state.data_root, state.apps)
+    assert "widget" not in unclaimed(state.data_root, state.apps)
 
 
 def test_unclaimed_survives_a_root_that_does_not_exist(tmp_path: Path) -> None:
@@ -254,7 +269,7 @@ def test_the_import_name_is_recorded_for_reporting(app: Flask) -> None:
     lets `/_status` show it, so a site can look the answer up rather than
     discover it from a boot failure.
     """
-    assert app.extensions["podpack"].installed_from == {"notes": "podpack_notes"}
+    assert app.extensions["podpack"].installed_from == {"widget": "fixture_app"}
 
 
 def test_mounting_is_not_visible_to_the_app(site: SiteFactory) -> None:
@@ -269,13 +284,13 @@ def test_mounting_is_not_visible_to_the_app(site: SiteFactory) -> None:
             "site": {
                 "name": "test site",
                 "environment": "test",
-                "apps": ["podpack_notes"],
-                "mounts": {"notes": "/writing/notes"},
+                "apps": ["fixture_app"],
+                "mounts": {"widget": "/writing/widget"},
             }
         }
     )
-    with app.test_request_context("/writing/notes/"):
-        assert app_config() == {"page_size": 5}
+    with app.test_request_context("/writing/widget/"):
+        assert app_config() == {"size": 5}
 
 
 def test_mounting_an_app_that_is_not_installed_is_a_boot_failure(site: SiteFactory) -> None:
@@ -290,8 +305,8 @@ def test_mounting_an_app_that_is_not_installed_is_a_boot_failure(site: SiteFacto
                 "site": {
                     "name": "x",
                     "environment": "test",
-                    "apps": ["podpack_notes"],
-                    "mounts": {"notez": "/typo"},
+                    "apps": ["fixture_app"],
+                    "mounts": {"widgetz": "/typo"},
                 }
             }
         )
@@ -304,7 +319,7 @@ def test_the_old_spelling_is_rejected_rather_than_ignored(site: SiteFactory) -> 
     no indication that its chosen address had stopped taking effect.
     """
     with pytest.raises(RuntimeError, match=r"\[site.mounts\]"):
-        site(host_config={"apps": {"notes": {"url_prefix": "/writing/notes"}}})
+        site(host_config={"apps": {"widget": {"url_prefix": "/writing/widget"}}})
 
 
 def test_nav_naming_an_unknown_endpoint_is_a_boot_failure(site: SiteFactory, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -313,37 +328,37 @@ def test_nav_naming_an_unknown_endpoint_is_a_boot_failure(site: SiteFactory, mon
     A bad nav endpoint breaks `url_for` in the chrome, so it would take out
     every page on the site rather than the one it points at.
     """
-    import podpack_notes
+    import fixture_app
 
     monkeypatch.setattr(
-        podpack_notes,
+        fixture_app,
         "site_app",
-        replace(podpack_notes.site_app, nav=(Section("Notes", "notes.nope"),)),
+        replace(fixture_app.site_app, nav=(Section("Widget", "widget.nope"),)),
     )
-    with pytest.raises(RuntimeError, match="notes.nope"):
+    with pytest.raises(RuntimeError, match="widget.nope"):
         site()
 
 
 def test_app_template_is_namespaced_and_used(client: FlaskClient) -> None:
-    """`notes/index.html` must resolve to the app's own copy."""
-    response = client.get("/notes/")
+    """`widget/index.html` must resolve to the app's own copy."""
+    response = client.get("/widget/")
     assert response.status_code == 200
-    assert "<h2>Notes</h2>" in response.get_data(as_text=True)
+    assert "<h2>Widget</h2>" in response.get_data(as_text=True)
 
 
 def test_app_renders_on_a_site_with_no_chrome(site: SiteFactory, site_package: Callable[[str, dict[str, str]], str]) -> None:
     """An app must render against a site that ships no base.html of its own.
 
     This is the one that actually exercises the fallback loader: the site
-    package below has a template directory but no `base.html`, and the notes
+    package below has a template directory but no `base.html`, and the fixture app's
     template extends one. Without podpack's loader appended *after* the
     blueprints, this raises TemplateNotFound.
     """
     site_package("bare_site", {})
     app = site(site_package="bare_site")
-    body = app.test_client().get("/notes/").get_data(as_text=True)
+    body = app.test_client().get("/widget/").get_data(as_text=True)
 
-    assert "<h2>Notes</h2>" in body
+    assert "<h2>Widget</h2>" in body
     assert "Served by podpack" in body  # podpack's default chrome
 
 
@@ -354,22 +369,22 @@ def test_site_can_override_an_app_template(site: SiteFactory, site_package: Call
     but the whole template story rests on it, so it is worth a test that would
     catch the loader wiring breaking it.
     """
-    site_package("mysite", {"notes/index.html": "OVERRIDDEN"})
+    site_package("mysite", {"widget/index.html": "OVERRIDDEN"})
     app = site(site_package="mysite")
 
-    assert app.test_client().get("/notes/").get_data(as_text=True) == "OVERRIDDEN"
+    assert app.test_client().get("/widget/").get_data(as_text=True) == "OVERRIDDEN"
 
 
 def test_per_app_directories_are_created(app: Flask) -> None:
     state = app.extensions["podpack"]
-    assert (state.data_root / "notes").is_dir()
-    assert (state.log_root / "notes").is_dir()
+    assert (state.data_root / "widget").is_dir()
+    assert (state.log_root / "widget").is_dir()
 
 
 def test_shipped_data_is_seeded_once(app: Flask, site: SiteFactory) -> None:
     """Seeding follows the db-init rule: first time on this machine, not every
     restart. Re-arming means deleting the app's host data directory."""
-    welcome = app.extensions["podpack"].data_root / "notes" / "welcome.md"
+    welcome = app.extensions["podpack"].data_root / "widget" / "seed.txt"
     assert welcome.is_file()
 
     welcome.write_text("edited on the host")
@@ -378,23 +393,25 @@ def test_shipped_data_is_seeded_once(app: Flask, site: SiteFactory) -> None:
 
     welcome.unlink()
     site()  # still not empty? it is now, so seeding re-arms
-    assert "ships inside the notes app" in welcome.read_text()
+    assert "shipped with the fixture app" in welcome.read_text()
 
 
 def test_seeded_data_is_read_from_the_host_copy(app: Flask, client: FlaskClient) -> None:
     """Editing the host copy must change the page, with no rebuild."""
-    welcome = app.extensions["podpack"].data_root / "notes" / "welcome.md"
-    welcome.write_text("host-side edit")
-    assert "host-side edit" in client.get("/notes/").get_data(as_text=True)
+    seeded = app.extensions["podpack"].data_root / "widget" / "seed.txt"
+    seeded.write_text("host-side edit")
+    # /widget/seeded reads the host copy, which is the whole point: an app runs
+    # against the seeded file on disk, not the one inside its own package.
+    assert client.get("/widget/seeded").get_data(as_text=True) == "host-side edit"
 
 
 def test_app_config_is_namespaced(client: FlaskClient, app: Flask) -> None:
     """An app reads its own section of the host config and no one else's."""
     from podpack import app_config
 
-    with app.test_request_context("/notes/"):
-        assert app_config().get("page_size") == 5
-        assert app_config("notes") == {"page_size": 5}
+    with app.test_request_context("/widget/"):
+        assert app_config().get("size") == 5
+        assert app_config("widget") == {"size": 5}
 
 
 def test_app_name_is_its_blueprint_name(app: Flask) -> None:
@@ -407,14 +424,14 @@ def test_app_name_is_its_blueprint_name(app: Flask) -> None:
     `app_config()` returning an empty dict -- with nothing raised at boot or in
     the request. Deriving the name is what makes that unrepresentable.
     """
-    from podpack_notes import site_app
+    from fixture_app import site_app
 
-    assert site_app.name == site_app.blueprint.name == "notes"
+    assert site_app.name == site_app.blueprint.name == "widget"
 
     state = app.extensions["podpack"]
-    with app.test_request_context("/notes/"):
-        assert data_dir() == state.data_root / "notes"
-        assert app_config() == {"page_size": 5}
+    with app.test_request_context("/widget/"):
+        assert data_dir() == state.data_root / "widget"
+        assert app_config() == {"size": 5}
 
 
 def test_site_app_takes_no_name_of_its_own(site: SiteFactory) -> None:
@@ -437,11 +454,11 @@ def test_migration_metadata_needs_no_application(tmp_path: Path, monkeypatch: py
     monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
 
     config = tmp_path / "app.toml"
-    config.write_text('[site]\nname = "x"\napps = ["podpack_notes"]\n')
+    config.write_text('[site]\nname = "x"\napps = ["fixture_app"]\n')
 
     from podpack.migrations import target_metadata
 
-    assert "notes" in target_metadata(config).tables
+    assert "widgets" in target_metadata(config).tables
 
 
 def test_unknown_app_is_a_boot_failure(site: SiteFactory) -> None:

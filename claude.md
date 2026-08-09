@@ -34,6 +34,7 @@ by hostname. Do not add `SERVER_NAME` handling or a site registry.
 | Directory | What it is | State |
 | --- | --- | --- |
 | `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 23 commits, working |
+| `~/sites/podpack-notes` | the notes app, extracted so a site can install it from outside podpack | 1 commit; **not yet pushed** — see §4 |
 | `~/sites/pp-pdf` | the PDF tools as a standalone installable package | 20 commits; **reconciled** — installs as a podpack app and still works as a plain blueprint (§5) |
 | `~/sites/holdenweb.com` | the original Flask site | untouched; **not yet adapted** — see §6 |
 
@@ -131,7 +132,7 @@ answer if this ever gets painful enough to justify multiple heads.
 
 ### Tests
 
-`uv run pytest` — 23 tests covering what the registry promises: the app list
+`uv run pytest` — 31 tests covering what the registry promises: the app list
 being configuration rather than code, models reaching `db.metadata`, template
 namespacing and site override, seeding once and re-arming, and the migration
 environment needing no Flask app.
@@ -156,6 +157,14 @@ contents, so its output is as sensitive as `secrets.env`.
 
 `SITE_NAME` also names the compose project and the image, so two sites on one
 host cannot collide. Distinct ports are still needed for a second site.
+
+**The lab's app list is empty, and should not stay that way.** `podpack_notes`
+now lives in `~/sites/podpack-notes` — extracted so this repository can
+demonstrate a site installing an app from *outside* itself, which is the one
+thing an in-tree app could never show. It is a path dev-dependency, which local
+work resolves and a container build cannot: a path source fails there with
+`Distribution not found at: file:///...`. Push that repository and the lab
+becomes the demonstration, in two edits recorded in `config/app.toml`.
 
 `init-storage` → `postgres` (waits healthy) → `migrate` → `web`.
 

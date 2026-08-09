@@ -21,7 +21,16 @@ base_url = "http://localhost:8458"
 # a site mostly *is*: adding a feature is a line here and a restart, with no
 # code change, no rebuild and no change to compose.yaml. Order matters -- nav
 # entries appear in it, and an app's init may rely on an earlier app's service.
-apps = ["podpack_notes"]
+# Empty until podpack-notes is pushed. It now lives in its own repository, and
+# a container build cannot install it from a sibling path -- that fails with
+# "Distribution not found at: file:///...". Once the repo has a remote, this
+# becomes a two-line change and the lab installs an app from outside itself,
+# which is the whole point of moving it out:
+#
+#   pyproject.toml   podpack-notes = { git = "https://github.com/holdenweb/podpack-notes.git" }
+#                    and move it from [dependency-groups] dev into [project] dependencies
+#   here             apps = ["podpack_notes"]
+apps = []
 
 # Where the site chooses to mount an app, overruling the `url_prefix` the app
 # asks for. Only apps being moved need an entry. Site policy rather than app

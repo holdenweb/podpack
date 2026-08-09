@@ -11,7 +11,7 @@ as ordinary Python packages and are installed by name:
 ```toml
 [site]
 name = "example.com"
-apps = ["podpack_notes"]
+apps = ["podpack_notes"]     # an app installed from its own repository
 ```
 
 Adding an already-installed feature to a running site requires adding a line

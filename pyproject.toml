@@ -23,14 +23,17 @@ requires = ["uv_build>=0.8.4,<0.9.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-# Two top-level packages in one distribution: the framework, and the first
-# plugin. `podpack_notes` is deliberately not a submodule of `podpack` -- when
-# a plugin graduates to a project of its own, as `pdf` will, that should be a
-# directory move plus a pyproject.toml rather than a refactor.
-module-name = ["podpack", "podpack_notes"]
+module-name = "podpack"
 
 [dependency-groups]
-dev = ["pytest>=8.0", "mypy>=1.11"]
+# podpack-notes is the lab site's app, not the framework's: it is what makes
+# this repository a working demonstration of installing an app from outside it.
+# The test suite deliberately does not use it -- tests/fixture_app exists so
+# that podpack can be tested with nothing else checked out.
+dev = ["pytest>=8.0", "mypy>=1.11", "podpack-notes"]
+
+[tool.uv.sources]
+podpack-notes = { path = "../podpack-notes", editable = true }
 
 [tool.mypy]
 # Annotations nobody checks are comments that look authoritative, so the

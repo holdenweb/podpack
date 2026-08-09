@@ -13,6 +13,10 @@ from podpack import create_app, db
 # and host config already bound in, so a test names only what it is varying.
 SiteFactory = Callable[..., Flask]
 
+# `apps = ["fixture_app"]` has to resolve like any other installed app, so the
+# tests directory goes on the path exactly as site-packages would be.
+sys.path.insert(0, str(Path(__file__).parent))
+
 # Secrets come from the environment in production; tests set them here rather
 # than relying on whatever happens to be exported in the shell.
 TEST_ENV = {
@@ -28,10 +32,10 @@ def host_config() -> dict[str, Any]:
         "site": {
             "name": "test site",
             "environment": "test",
-            "apps": ["podpack_notes"],
+            "apps": ["fixture_app"],
         },
         "database": {"echo": False},
-        "apps": {"notes": {"page_size": 5}},
+        "apps": {"widget": {"size": 5}},
     }
 
 
@@ -100,7 +104,7 @@ def app_package(tmp_path: Path) -> Iterator[Callable[[str, str], str]]:
     """Create an importable single-module podpack app with the given source.
 
     Cheaper and clearer than shipping a second fixture app in the repository,
-    and it lets a test install something that `podpack_notes` deliberately is
+    and it lets a test install something `tests/fixture_app` deliberately is
     not -- an app mounted at the site root, say.
     """
     created = []

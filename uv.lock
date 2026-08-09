@@ -513,6 +513,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "podpack-notes" },
     { name = "pytest" },
 ]
 
@@ -524,6 +525,24 @@ requires-dist = [
     { name = "gunicorn", specifier = ">=22.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
 ]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "podpack-notes", editable = "../podpack-notes" },
+    { name = "pytest", specifier = ">=8.0" },
+]
+
+[[package]]
+name = "podpack-notes"
+version = "0.1.0"
+source = { editable = "../podpack-notes" }
+dependencies = [
+    { name = "podpack" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "podpack", editable = "." }]
 
 [package.metadata.requires-dev]
 dev = [

@@ -58,6 +58,31 @@ def healthz() -> ResponseReturnValue:
     return jsonify(status="ok", database="ok")
 
 
+def _database_identity() -> dict[str, str]:
+    """Which database, role and schema the site is actually connected as.
+
+    Asking the server rather than parsing the URI is the point: it answers what
+    the connection *became*, including the search_path the bootstrap set, which
+    is what catches a wrong grant. But those three functions are
+    PostgreSQL's, so on SQLite -- which is what a site uses before it has a
+    database server -- the query fails and used to take the whole route with it.
+    A diagnostic that only works once everything is right is no diagnostic.
+    """
+    try:
+        row = db.session.execute(
+            sa.text("SELECT current_database(), current_user, current_schema()")
+        ).one()
+    except SQLAlchemyError:
+        db.session.rollback()
+        url = db.engine.url
+        return {
+            "database": url.database or "(none)",
+            "database_user": url.username or "(not applicable)",
+            "database_schema": f"(not reported by {url.get_backend_name()})",
+        }
+    return {"database": row[0], "database_user": row[1], "database_schema": row[2]}
+
+
 @core_blueprint.route("/_status")
 def status() -> ResponseReturnValue:
     """Report where every piece of this site's state actually lives.
@@ -68,10 +93,8 @@ def status() -> ResponseReturnValue:
     effect?" is answerable without reading the container's environment.
     """
     state = current_app.extensions["podpack"]
-    row = db.session.execute(
-        sa.text("SELECT current_database(), current_user, current_schema()")
-    ).one()
     return jsonify(
+        **_database_identity(),
         site=state.host_config["site"],
         config_source=os.environ.get("PODPACK_CONFIG", "(default)"),
         # Baked in at build time. The question this answers is "is the container
@@ -80,9 +103,6 @@ def status() -> ResponseReturnValue:
         # symptom of forgetting is a site that behaves like the previous commit.
         # A `-dirty` suffix means the image was built from an uncommitted tree.
         build_commit=os.environ.get("PODPACK_BUILD_COMMIT", "unknown"),
-        database=row[0],
-        database_user=row[1],
-        database_schema=row[2],
         data_root=str(state.data_root),
         log_root=str(state.log_root),
         # What is on disk that no installed app answers for -- normally empty.
