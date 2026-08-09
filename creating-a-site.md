@@ -9,6 +9,10 @@ A site is a Python package that calls podpack's factory, a TOML file saying what
 it is and what it installs, and — to deploy it — a copy of the container
 substrate.
 
+**`~/sites/podpack-demo` is the worked output of this document**, built by
+following it rather than by copying podpack. If these instructions stop working,
+that site stops building, which is the point of keeping it.
+
 **Work in one shell throughout.** The environment variables set in step 6 are
 needed by steps 7 and 8; a new terminal between sections fails with no hint as
 to why.

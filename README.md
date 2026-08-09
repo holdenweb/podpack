@@ -14,6 +14,10 @@ name = "example.com"
 apps = ["podpack_notes"]     # an app installed from its own repository
 ```
 
+podpack itself installs no app — a repository that installed one would be a
+site. For a running example see `~/sites/podpack-demo`, and
+[creating-a-site.md](creating-a-site.md) for how to build one.
+
 Adding an already-installed feature to a running site requires adding a line
 in that file and a restart — no code change, no rebuild, and no change to
 `compose.yaml`.
