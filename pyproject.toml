@@ -3,6 +3,8 @@ name = "podpack"
 version = "0.2.0"
 description = "A framework for building and running web sites out of pluggable apps"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENCE"]
 requires-python = ">=3.12"
 dependencies = [
     # Deliberately the same stack the real holdenweb package uses, so that what
