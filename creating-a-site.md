@@ -13,6 +13,9 @@ substrate.
 following it rather than by copying podpack. If these instructions stop working,
 that site stops building, which is the point of keeping it.
 
+This document installs an app that already exists. To *write* one, see
+[writing-an-app.md](writing-an-app.md).
+
 **Work in one shell throughout.** The environment variables set in step 6 are
 needed by steps 7 and 8; a new terminal between sections fails with no hint as
 to why.

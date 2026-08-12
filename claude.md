@@ -63,7 +63,10 @@ apps = ["podpack_notes"]
 
 Adding a feature to a running site is a line in that file and a restart — no
 code change, no rebuild, no change to `compose.yaml`. The full plugin API is
-documented in [README.md](README.md); this is the shape of it.
+documented in [README.md](README.md); this is the shape of it. Building an app
+against that API — packaging, running, testing and shipping one — is
+[writing-an-app.md](writing-an-app.md), the counterpart to
+[creating-a-site.md](creating-a-site.md).
 
 ### The contract
 

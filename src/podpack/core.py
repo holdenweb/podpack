@@ -123,6 +123,11 @@ def status() -> ResponseReturnValue:
                 "data_dir_writable": os.access(state.data_root / name, os.W_OK),
                 "log_dir": str(state.log_root / name),
                 "log_dir_writable": os.access(state.log_root / name, os.W_OK),
+                # The one namespace apps share, so the only one where ownership
+                # is worth reporting rather than deriving from the app's name.
+                "tables": sorted(
+                    table for table, owner in state.table_owners.items() if owner == name
+                ),
                 "stored_files": sorted(
                     p.name for p in (state.data_root / name).iterdir() if p.is_file()
                 ),

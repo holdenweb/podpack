@@ -5,6 +5,7 @@ not, so a failure here means the plugin mechanism has stopped being a plugin
 mechanism.
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 from flask import Blueprint, Flask, url_for
 from flask.testing import FlaskClient
+from sqlalchemy.exc import InvalidRequestError
 
 from conftest import SiteFactory
 
@@ -470,3 +472,163 @@ def test_module_without_site_app_is_rejected(site: SiteFactory) -> None:
     """A clear error beats a site that boots with a feature silently missing."""
     with pytest.raises(RuntimeError, match="no module-level"):
         site(host_config={"site": {"name": "x", "environment": "test", "apps": ["json"]}})
+
+
+BARE_BLUEPRINT_APP = '''
+from flask import Blueprint
+
+blueprint = Blueprint("bare", __name__)
+
+
+@blueprint.route("/")
+def index() -> str:
+    return "hi"
+
+
+site_app = blueprint          # the plain-blueprint packaging, not podpack's
+'''
+
+
+def test_a_bare_blueprint_is_named_as_such(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """The wrong type and the missing name are different mistakes.
+
+    `pp-pdf` shows why this one is worth distinguishing: a package can be usable
+    both as a plain blueprint and as a podpack app, so exporting the blueprint
+    under this name is a natural half-step rather than an exotic error. While
+    both cases shared a message, it told an author whose module said `site_app =
+    blueprint` that the module exposed no `site_app`.
+    """
+    app_package("bare_blueprint_app", BARE_BLUEPRINT_APP)
+    with pytest.raises(RuntimeError, match="is a Blueprint, not a SiteApp"):
+        site(
+            host_config={
+                "site": {"name": "x", "environment": "test", "apps": ["bare_blueprint_app"]}
+            }
+        )
+
+
+def test_the_migration_environment_holds_apps_to_the_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Because `migrate` gates `web`, and a gate that passes blames the wrong thing.
+
+    A module with no `site_app` used to sail through here, so the compose stack's
+    one-shot `migrate` service completed successfully, satisfied
+    `service_completed_successfully`, and the site failed in `web` -- one service
+    after the cause. Checked without a Flask app, so ADR-0010 still holds, which
+    is what deleting the secrets below is for.
+    """
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
+
+    config = tmp_path / "app.toml"
+    config.write_text('[site]\nname = "x"\napps = ["json"]\n')
+
+    from podpack.migrations import target_metadata
+
+    with pytest.raises(RuntimeError, match="no module-level"):
+        target_metadata(config)
+
+
+CLASHING_APP = '''
+from flask import Blueprint
+from podpack import SiteApp, db
+
+
+class Thing(db.Model):
+    __tablename__ = "shared_table_name"
+    id = db.Column(db.Integer, primary_key=True)
+
+
+blueprint = Blueprint("{name}", __name__)
+
+
+@blueprint.route("/")
+def index() -> str:
+    return "hi"
+
+
+site_app = SiteApp(blueprint=blueprint, url_prefix="/{name}")
+'''
+
+
+def test_a_table_name_clash_names_both_apps(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """SQLAlchemy names the table; podpack has to supply the two apps.
+
+    Table names are the one identifier podpack does not namespace, so this is
+    the one collision it cannot prevent -- only explain. The site owner hitting
+    it installed two apps written by people who never met.
+    """
+    app_package("clash_first", CLASHING_APP.format(name="clashfirst"))
+    app_package("clash_second", CLASHING_APP.format(name="clashsecond"))
+
+    with pytest.raises(RuntimeError) as caught:
+        site(
+            host_config={
+                "site": {
+                    "name": "x",
+                    "environment": "test",
+                    "apps": ["clash_first", "clash_second"],
+                }
+            }
+        )
+
+    message = str(caught.value)
+    assert "clash_second" in message          # the one being installed
+    assert "clashfirst" in message            # the one that already claimed it
+    assert "shared_table_name" in message
+    # SQLAlchemy's own error stays in the chain rather than being swallowed.
+    assert isinstance(caught.value.__cause__, InvalidRequestError)
+
+
+UNNAMESPACED_APP = '''
+from flask import Blueprint
+from podpack import SiteApp, db
+
+
+class Thing(db.Model):
+    __tablename__ = "borrowed_noun"
+    id = db.Column(db.Integer, primary_key=True)
+
+
+blueprint = Blueprint("tidyapp", __name__)
+
+
+@blueprint.route("/")
+def index() -> str:
+    return "hi"
+
+
+site_app = SiteApp(blueprint=blueprint, url_prefix="/tidyapp")
+'''
+
+
+def test_an_unnamespaced_table_name_is_warned_about(
+    site: SiteFactory,
+    app_package: Callable[[str, str], str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A warning and not a failure, because the name is legal and may be wanted.
+
+    It fires while the author is watching. The collision it anticipates happens
+    on a site that installs two apps, which is the one moment nobody who can fix
+    it is in the room.
+    """
+    app_package("tidy_app", UNNAMESPACED_APP)
+    with caplog.at_level(logging.WARNING, logger="podpack.registry"):
+        site(host_config={"site": {"name": "x", "environment": "test", "apps": ["tidy_app"]}})
+
+    assert "borrowed_noun" in caplog.text
+    assert "tidyapp" in caplog.text
+
+
+def test_a_namespaced_table_name_is_not_warned_about(
+    app: Flask, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The teeth on the one above: the fixture app's `widgets` starts with `widget`."""
+    assert app.extensions["podpack"].table_owners["widgets"] == "widget"
+    assert "widgets" not in caplog.text

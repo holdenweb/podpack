@@ -22,6 +22,8 @@ convention: `models.py` if it has models, `templates/<name>/` if it has
 templates, `data/` if it ships data.
 """
 
+import logging
+import re
 import shutil
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
@@ -29,12 +31,20 @@ from importlib import import_module
 from importlib.resources import as_file, files
 from importlib.util import find_spec
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from flask import Blueprint, Flask
+from sqlalchemy.exc import InvalidRequestError
 
 from .nav import Section
 from .paths import attach_file_logging, prepare
+
+logger = logging.getLogger(__name__)
+
+# SQLAlchemy's wording for a second definition of one table name. Matched rather
+# than depended on: see `_clashing_table` for what happens when it changes.
+_ALREADY_DEFINED = re.compile(r"Table '([^']+)' is already defined")
 
 
 @dataclass(frozen=True)
@@ -92,6 +102,13 @@ class PodpackState:
     apps: dict[str, SiteApp] = field(default_factory=dict)
     nav: list[Section] = field(default_factory=list)
 
+    table_owners: dict[str, str] = field(default_factory=dict)
+    """Table name to the app that put it on `db.metadata`.
+
+    The one namespace shared across installed apps, so the only one where "which
+    app owns this?" is a question that needs asking. `/_status` reports it.
+    """
+
     installed_from: dict[str, str] = field(default_factory=dict)
     """App name to the import name it was installed from.
 
@@ -120,26 +137,13 @@ def install_apps(app: Flask, names: Iterable[str]) -> None:
 
 
 def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
-    module = import_module(module_name)
-    site_app = getattr(module, "site_app", None)
-    if not isinstance(site_app, SiteApp):
-        raise RuntimeError(
-            f"{module_name} is listed as an installed app but exposes no "
-            "module-level `site_app`; see podpack.registry for the contract"
-        )
+    site_app = _import_app(module_name, state.table_owners)
     if site_app.name in state.apps:
         raise RuntimeError(
             f"two installed apps share the blueprint name {site_app.name!r}; it "
             "has to be unique because it decides the template namespace, the "
             "data and log directories, and the config section"
         )
-
-    # Importing the models module *is* model registration: defining a db.Model
-    # subclass registers it on db.metadata as an import side effect. It happens
-    # here, at install time, because alembic reads that metadata after building
-    # an app -- so an app whose models were imported lazily would be invisible
-    # to autogenerate and its tables would silently never be created.
-    _import_if_present(f"{module_name}.models")
 
     data_dir = prepare(state.data_root, site_app.name)
     log_dir = prepare(state.log_root, site_app.name)
@@ -230,10 +234,131 @@ def import_app_models(names: Iterable[str]) -> None:
     use for its blueprint, its templates or its data directory -- and no way to
     create the last of those, since it runs without a Flask app. Keeping this
     separate from `install_apps` is what lets alembic work without one.
+
+    It holds every app to the same contract even so, and the reason is the shape
+    of the compose stack rather than anything about migrations. `migrate` runs
+    before `web` and gates it with `service_completed_successfully`. While this
+    accepted a module with no `site_app`, that gate passed, and the site's real
+    failure surfaced one service later in `web` -- so the logs blamed the thing
+    that was merely next. The check needs no Flask app, so ADR-0010 is untouched.
     """
+    owners: dict[str, str] = {}
     for name in names:
-        import_module(name)
-        _import_if_present(f"{name}.models")
+        _import_app(name, owners)
+
+
+def _import_app(module_name: str, table_owners: dict[str, str]) -> SiteApp:
+    """Import an app, check the contract, and record the tables it contributed.
+
+    Importing the app *is* model registration: defining a `db.Model` subclass
+    registers it on `db.metadata` as an import side effect. `models.py` is
+    imported explicitly because it is the one module the convention promises to
+    reach even when nothing in the package imports it.
+
+    The tables are recorded because `db.metadata` is the one namespace podpack
+    does not divide by app -- templates, data and log directories and config
+    sections all carry the app's name, table names do not. SQLAlchemy refuses
+    the second app to claim a name, which is right, but its error identifies the
+    table and neither of the two apps responsible; knowing who claimed what is
+    the whole of the difference between that and a message worth reading.
+    """
+    try:
+        module = import_module(module_name)
+        site_app = _site_app(module_name, module)
+        _import_if_present(f"{module_name}.models")
+    except InvalidRequestError as exc:
+        raise RuntimeError(_clashing_table(module_name, table_owners, exc)) from exc
+
+    for table in sorted(_tables_declared_by(module_name)):
+        table_owners[table] = site_app.name
+        if not table.startswith(site_app.name):
+            # Warned here rather than checked at the clash, because the clash
+            # happens on whichever site installs both apps -- by which time the
+            # author who could fix it is not the person reading the error.
+            logger.warning(
+                "app %r declares the table %r, which its own name does not "
+                "prefix. Table names are shared across every installed app, so "
+                "a second app claiming %r will stop a site booting.",
+                site_app.name,
+                table,
+                table,
+            )
+    return site_app
+
+
+def _tables_declared_by(module_name: str) -> set[str]:
+    """The tables whose models were defined inside this app's package.
+
+    Asked of the mapper registry rather than measured as what an import added to
+    `db.metadata`, because that metadata belongs to the process and not to the
+    site: build a second site in one interpreter -- which every test suite does,
+    and no deployment does -- and the modules are already imported, so the second
+    site's apps appear to have contributed nothing. Attribution by defining
+    module gives the same answer however many times a site is built.
+    """
+    from . import db
+
+    prefix = f"{module_name}."
+    # flask-sqlalchemy types `db.Model` with a protocol that does not declare
+    # `registry`, though the declarative base it builds at runtime carries one.
+    registry = db.Model.registry  # type: ignore[attr-defined]
+    return {
+        mapper.local_table.name
+        for mapper in registry.mappers
+        if mapper.local_table is not None
+        and (mapper.class_.__module__ == module_name or mapper.class_.__module__.startswith(prefix))
+    }
+
+
+def _site_app(module_name: str, module: ModuleType) -> SiteApp:
+    """The app's `site_app`, or an error saying which way it is wrong."""
+    site_app = getattr(module, "site_app", None)
+    if site_app is None:
+        raise RuntimeError(
+            f"{module_name} is listed as an installed app but exposes no "
+            "module-level `site_app`; see podpack.registry for the contract"
+        )
+    # Separately from the absent case, because the two were one check and its
+    # message described only the first. An app packaged as a plain blueprint --
+    # `site_app = blueprint`, the natural move for anyone coming from
+    # register_blueprint -- was told it exposed no `site_app` while the name sat
+    # in plain sight in its module, which sends the reader looking for a missing
+    # line rather than a wrong type.
+    if not isinstance(site_app, SiteApp):
+        raise RuntimeError(
+            f"{module_name}.site_app is a {type(site_app).__name__}, not a "
+            "SiteApp. A podpack app wraps its blueprint rather than exporting "
+            "it: `site_app = SiteApp(blueprint=..., url_prefix=...)`; see "
+            "podpack.registry for the contract"
+        )
+    return site_app
+
+
+def _clashing_table(
+    module_name: str, table_owners: dict[str, str], exc: InvalidRequestError
+) -> str:
+    """Name both apps in a table-name collision, where SQLAlchemy names neither.
+
+    The table is read out of SQLAlchemy's message because the import that would
+    have told us aborted part way through. A miss is survivable -- the apps
+    installed so far and what they claimed is still more than the original error
+    said -- so this reports what it has rather than insisting on a match.
+    """
+    match = _ALREADY_DEFINED.search(str(exc))
+    table = match.group(1) if match else None
+    if table is not None and table in table_owners:
+        clash = f"the table {table!r}, which {table_owners[table]!r} already claims"
+    elif table is not None:
+        clash = f"the table {table!r}, which is already on db.metadata"
+    else:
+        claimed = ", ".join(f"{t} ({a})" for t, a in sorted(table_owners.items()))
+        clash = f"a table already on db.metadata; claimed so far: {claimed or '(none)'}"
+    return (
+        f"installing {module_name!r} failed: it declares {clash}. Table names "
+        "are shared across every installed app -- unlike templates, data "
+        "directories and config sections, which podpack namespaces by app name "
+        "-- so prefix __tablename__ with the app's own name."
+    )
 
 
 def _import_if_present(module_name: str) -> None:

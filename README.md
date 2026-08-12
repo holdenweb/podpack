@@ -16,7 +16,9 @@ apps = ["podpack_notes"]     # an app installed from its own repository
 
 podpack itself installs no app — a repository that installed one would be a
 site. For a running example see `~/sites/podpack-demo`, and
-[creating-a-site.md](creating-a-site.md) for how to build one.
+[creating-a-site.md](creating-a-site.md) for how to build one. The other side of
+the contract — writing, running, testing and shipping an app — is
+[writing-an-app.md](writing-an-app.md).
 
 Adding an already-installed feature to a running site requires adding a line
 in that file and a restart — no code change, no rebuild, and no change to
@@ -91,7 +93,8 @@ survives either way; see [Starting over](#starting-over).
 # The plugin API
 
 An app is a package exposing **one module-level `site_app`**. Everything else is
-convention.
+convention. This section is the reference;
+[writing-an-app.md](writing-an-app.md) is the worked guide to building one.
 
 ```python
 # myapp/__init__.py
@@ -163,7 +166,10 @@ def create_app():
     return podpack.create_app(site_package="holdenweb", init=_wire)
 
 def _wire(app):
-    settings = podpack.app_config("mail")          # from [apps.mail] or your own table
+    # `app_config` needs an app context and podpack pushes none before calling
+    # init; and with no request to resolve an app from, the name is required.
+    with app.app_context():
+        settings = podpack.app_config("mail")      # from [apps.mail] or your own table
     app.config.update(MAIL_SERVER=settings["server"])
     mail.init_app(app)
     security.init_app(app, user_datastore)
@@ -171,6 +177,9 @@ def _wire(app):
 
 It runs **after** the site's config is loaded and **before** the apps are
 installed, so an app's own `init` can rely on a service the site registered.
+Without the `app_context()` the site does not boot — it fails with
+`RuntimeError: Working outside of application context.`, and an app's own
+`SiteApp.init` is subject to exactly the same rule.
 
 The reason these are not apps is worth knowing, because writing shims to make
 them look like apps is a natural first thought: `flask-mailman` and
@@ -304,6 +313,13 @@ Name no schema. The application role's `search_path` points at the `app` schema
 it owns, so unqualified names land in the right place and alembic needs no
 schema configuration either.
 
+**Prefix `__tablename__` with the app's name.** Table names are the one
+identifier podpack does *not* namespace — templates, data and log directories
+and config sections all carry it, `db.metadata` is one flat namespace shared by
+every installed app. podpack warns as it installs an app whose table names its
+own name does not prefix, and refuses to boot a site where two apps claim the
+same one, naming both. `/_status` reports which app owns which table.
+
 ## Data and logs
 
 Every installed app gets a subdirectory of the host-mounted roots, named after
@@ -395,6 +411,13 @@ Because a revision's directory does not say which app it came from, its
 Building that metadata deliberately does *not* construct a Flask app. The
 factory needs a secret key and a database URI before it will run, and coupling
 migrations to it would make a broken factory a broken migration too.
+
+It does hold every app to the plugin contract even so, and the reason is the
+ordering rather than anything about migrations: `migrate` gates `web` with
+`service_completed_successfully`. While a module with no `site_app` was accepted
+here, that gate passed and the site's real failure surfaced in `web` — one
+service after the cause, so the logs blamed whatever came next. Checking costs
+no Flask app.
 
 ### The footgun: autogenerate sees only the apps that are enabled
 
