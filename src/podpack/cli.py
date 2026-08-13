@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> int:
         "init": _init,
         "upgrade": _upgrade,
         "status": _status,
+        "services": _services,
         "diff": _diff,
     }[args.subcommand]
     return handler(args)
@@ -87,6 +88,23 @@ def _build_parser() -> argparse.ArgumentParser:
     stat.add_argument("--dir", default=".")
     stat.add_argument("--check", action="store_true",
                       help="exit 1 if an upgrade would write or conflict")
+
+    svc = actions.add_parser(
+        "services",
+        help="report the site's backing services, or add one",
+        description=(
+            "Which backing services this site runs is the site owner's "
+            "decision, taken independently of what any installed app might "
+            "like. Services are addable; there is deliberately no --remove, "
+            "because taking a store away is a decision about data rather "
+            "than about configuration -- edit COMPOSE_FILE yourself, and "
+            "nothing podpack owns will have destroyed anything."
+        ),
+    )
+    svc.add_argument("--dir", default=".")
+    svc.add_argument("--add", metavar="NAME", action="append", default=[],
+                     help="enable a catalogued service for this site")
+    svc.add_argument("--dry-run", action="store_true", help="report without writing")
 
     diff = actions.add_parser("diff", help="diff substrate files against the installed version")
     diff.add_argument("--dir", default=".")
@@ -266,6 +284,74 @@ def _status(args: argparse.Namespace) -> int:
     if args.check and pending:
         return 1
     return 0
+
+
+def _services(args: argparse.Namespace) -> int:
+    site_dir = _site_dir(args)
+    state = _load_or_complain(site_dir)
+    if state is None:
+        return 2
+    catalogue = substrate.services.CATALOGUE
+    enabled = list(Parameters.from_state(state.parameters).site_services)
+
+    if not args.add:
+        print(f"COMPOSE_FILE  {substrate.services.compose_file_line(enabled)}")
+        for name, service in catalogue.items():
+            mark = "enabled  " if name in enabled else "available"
+            print(f"  {name:10} {mark}  {service.summary}")
+        return 0
+
+    unknown_services = substrate.services.unknown(args.add)
+    if unknown_services:
+        print("no such core service: " + ", ".join(unknown_services))
+        print("available: " + ", ".join(substrate.services.names()))
+        return 2
+
+    added = [name for name in args.add if name not in enabled]
+    if not added:
+        print(f"already enabled: {', '.join(args.add)}")
+        return 0
+    enabled.extend(added)
+    ordered = tuple(name for name in catalogue if name in enabled)
+    line = substrate.services.compose_file_line(ordered)
+
+    print(f"adding: {', '.join(added)}")
+    print(f"COMPOSE_FILE  {line}")
+    if args.dry_run:
+        print("(dry run: nothing written)")
+        return 0
+
+    # Rewriting a line in .env is something only this command may do, and only
+    # because rewriting exactly that line is what it was asked for. The
+    # append-only rule protects a site's config from an *upgrade* changing it
+    # unasked; an explicit `services --add` is the opposite of unasked.
+    state.parameters["site_services"] = ",".join(ordered)
+    for name in (".env", ".env.example"):
+        target = site_dir / name
+        if target.is_file() and not substrate.escapes(site_dir, target):
+            text = target.read_text()
+            if "COMPOSE_FILE=" in text:
+                target.write_text(
+                    re.sub(r"^COMPOSE_FILE=.*$", f"COMPOSE_FILE={line}", text, flags=re.M)
+                )
+                print(f"  set COMPOSE_FILE in {name}")
+
+    # The new service's own variables arrive by the ordinary delivery rule --
+    # its fragment is part of this site's canon from now on.
+    actions, state, conflicts = substrate.plan_upgrade(site_dir, state, substrate.source_root())
+    substrate.apply(actions, site_dir)
+    state.save(site_dir)
+    _report([a for a in actions if a.verb not in ("ok", "locally edited (kept)")])
+
+    print()
+    print("Still yours to do, because podpack writes neither secrets nor host state:")
+    for name in added:
+        service = catalogue[name]
+        print(f"  1. add {service.uri} and its credentials to secrets.env "
+              f"(secrets.env.example now shows them)")
+    print("  2. ./scripts/prepare-host-dirs.sh   (creates the new host directories)")
+    print("  3. podman compose down && ./scripts/up.sh")
+    return 1 if conflicts else 0
 
 
 def _diff(args: argparse.Namespace) -> int:
