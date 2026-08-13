@@ -189,7 +189,7 @@ def podpack_version() -> str:
     return _distribution_version("podpack")
 
 
-def source_root() -> Traversable:
+def source_root() -> Traversable | Path:
     return files("podpack.substrate") / "data"
 
 
@@ -197,7 +197,7 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def render(entry: SubstrateFile, params: Parameters, root: Traversable) -> bytes:
+def render(entry: SubstrateFile, params: Parameters, root: Traversable | Path) -> bytes:
     """The canonical content of one file for one site.
 
     Substitution is a literal token replace: str.format and string.Template
@@ -253,7 +253,7 @@ def env_var_blocks(text: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def plan_init(site_dir: Path, params: Parameters, root: Traversable) -> tuple[list[Action], State]:
+def plan_init(site_dir: Path, params: Parameters, root: Traversable | Path) -> tuple[list[Action], State]:
     """Lay down a complete substrate, or adopt an existing copy in place.
 
     Both audiences fall out of one rule set: on an empty site everything is
@@ -332,7 +332,7 @@ def _entry_for(target: str) -> SubstrateFile:
 def plan_upgrade(
     site_dir: Path,
     state: State,
-    root: Traversable,
+    root: Traversable | Path,
     take_upstream: set[str] | None = None,
     keep: set[str] | None = None,
 ) -> tuple[list[Action], State, int]:
@@ -503,7 +503,7 @@ def apply(actions: list[Action], site_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def status(site_dir: Path, state: State, root: Traversable) -> tuple[list[str], bool]:
+def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list[str], bool]:
     """One line per file, and whether an upgrade would act or conflict."""
     params = Parameters.build(
         state.parameters["site_package"], site_name=state.parameters["site_name"]

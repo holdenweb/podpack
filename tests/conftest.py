@@ -1,3 +1,4 @@
+import gc
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -122,6 +123,13 @@ def app_package(tmp_path: Path) -> Iterator[Callable[[str, str], str]]:
         sys.modules.pop(name, None)
     if str(tmp_path) in sys.path:
         sys.path.remove(str(tmp_path))
+    # A test app whose import *failed* (the table-clash test induces exactly
+    # that) leaves a half-constructed model class alive only through its
+    # traceback; SQLAlchemy's registry holds it weakly and trips over it on
+    # the next mapper sweep -- but only if the collector has not run yet, so
+    # the failure lands on whichever test follows, nondeterministically.
+    # Collect deterministically instead.
+    gc.collect()
 
 
 @pytest.fixture
