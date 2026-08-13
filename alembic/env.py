@@ -17,6 +17,16 @@ from sqlalchemy import engine_from_config, pool
 
 from podpack.migrations import target_metadata as _target_metadata
 
+# A site that keeps its environment in a .env file gets it loaded here too,
+# so host-side alembic runs see the same variables the site does. Guarded:
+# python-dotenv is the site's dependency if it is anyone's, not podpack's.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 config = context.config
 
 if config.config_file_name is not None:
@@ -28,7 +38,10 @@ db_url = os.environ.get("SQLALCHEMY_DATABASE_URI")
 if db_url:
     config.set_main_option("sqlalchemy.url", db_url)
 
-target_metadata = _target_metadata()
+# The same default the application uses in development: the site's config file
+# at its conventional in-repo path. In the container, PODPACK_CONFIG is set and
+# points at the mounted copy, exactly as it is for the running site.
+target_metadata = _target_metadata(os.environ.get("PODPACK_CONFIG", "config/app.toml"))
 
 
 def run_migrations_offline() -> None:
