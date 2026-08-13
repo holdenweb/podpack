@@ -1,6 +1,6 @@
 [project]
 name = "podpack"
-version = "0.2.2"
+version = "0.3.0"
 description = "A framework for building and running web sites out of pluggable apps"
 readme = "README.md"
 license = "MIT"
@@ -19,6 +19,9 @@ dependencies = [
 [[project.authors]]
 name = "Steve Holden"
 email = "steve@holdenweb.com"
+
+[project.scripts]
+podpack = "podpack.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.8.4,<0.9.0"]
@@ -41,3 +44,6 @@ files = ["src", "tests"]
 # Flask-SQLAlchemy and flask-paranoid ship no stubs; missing imports would
 # otherwise drown the errors worth reading.
 ignore_missing_imports = true
+# The canonical substrate is shipped data, not importable code -- its env.py
+# and healthcheck.py are copied into sites, never imported from here.
+exclude = 'src/podpack/substrate/data/'

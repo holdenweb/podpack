@@ -1,0 +1,43 @@
+# What the build has no business seeing.
+#
+# Named `.dockerignore` rather than `.containerignore`: podman build honours
+# either, and this is the name the Compose v2 provider documents, so one file
+# covers both ways of building.
+#
+# Without this the context is 90MB, of which 87MB is the running database and a
+# macOS virtual environment that could never work in a Linux image. Worse than
+# the size: `COPY src/` and `COPY alembic/` would sweep up the host's
+# __pycache__, so the image shipped bytecode compiled on a laptop -- including
+# valid bytecode for migrations that had been deleted, which no `.py` in the
+# repo accounts for. Those .pyc keep their mtime and size through COPY, so they
+# validate and are loaded in preference to compiling the source that is there.
+#
+# It also restores layer caching: a local `uv run pytest` rewrites __pycache__,
+# which changed the hash of `COPY src/` and so reinstalled the project and
+# re-copied the venv on the next build.
+
+# Host-mapped state: the live PostgreSQL cluster and the apps' data and logs.
+hostdata/
+hostlogs/
+
+# A macOS venv, wrong architecture and wrong absolute paths for the image.
+.venv/
+
+.git/
+.github/
+.claude/
+
+# The `**/` matters and is not decoration: a bare `__pycache__/` anchors to the
+# context root, so it would exclude nothing under src/ or alembic/ and quietly
+# leave this whole file doing nothing.
+**/__pycache__
+**/*.py[cod]
+.pytest_cache/
+
+dist/
+**/*.egg-info
+
+# Editor and local tooling.
+*.wpr
+*.wpu
+.DS_Store

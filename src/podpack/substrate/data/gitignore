@@ -1,0 +1,19 @@
+# Per-host wiring and credentials -- never committed. `.env` is edited per
+# host; `secrets.env` must be restored verbatim from a backup.
+.env
+secrets.env
+
+# Host-mapped container state: the live database cluster and per-app data
+# and logs.
+hostdata/
+hostlogs/
+
+# Python.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dist/
+
+# Conflict copies written by `podpack substrate upgrade` -- resolve and
+# remove them; committing one is a loud reminder, not an error.

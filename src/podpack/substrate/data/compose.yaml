@@ -1,0 +1,192 @@
+name: ${SITE_NAME:-podpack}
+
+# The PostgreSQL lab. Same principle as its MongoDB sibling (which stayed in the
+# holdenweb.com working tree when this one moved out): a Flask app plus a
+# database server, where neither container owns any state or any host-specific
+# setting.
+#
+#   * persistent state  -> bind-mounted from ${HOST_DATA_DIR} on the host
+#   * host-specific cfg -> bind-mounted read-only from ./config
+#   * per-host wiring   -> .env, the file you edit when the site moves
+#   * credentials       -> secrets.env, restored verbatim and never edited
+#
+# The two environment files are split by what a restore does to them, not by
+# secrecy: .env is expected to change on a new host, secrets.env must not. Only
+# .env is read for substitution, so nothing below refers to a credential and
+# this file stays safe to commit and to read.
+#
+# `podman compose config` is a different matter -- it expands env_file contents
+# into the environment it prints, credentials and all. Do not paste its output
+# anywhere you would not paste secrets.env itself.
+#
+# Unlike its Mongo sibling, this one mirrors the real holdenweb stack:
+# Flask-SQLAlchemy over psycopg2, connecting with SQLALCHEMY_DATABASE_URI.
+
+services:
+  # Bind-mounted host directories arrive owned by whoever owns them on the
+  # host, which is never the unprivileged uid a server drops to. This
+  # short-lived root container fixes that once, before anything else starts,
+  # so the suite comes up on a bare machine with no manual chown step.
+  #
+  # It is not a security hole: under rootless podman "root" here is your own
+  # user in a namespace, and uid 999/10001 map to your subuids. On macOS the
+  # change is namespace-local -- the host keeps its own ownership.
+  init-storage:
+    image: docker.io/library/busybox:1.37
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        chown -R 999:999     /mnt/pg-data /mnt/pg-logs
+        chown -R 10001:10001 /mnt/app-data /mnt/app-logs
+        echo "host storage ownership prepared"
+    volumes:
+      # The two app roots are handed to the web container's uid wholesale, and
+      # PostgreSQL's directories to its own -- which is why apps live under an
+      # `apps/` level rather than beside `postgres/`. A single recursive chown
+      # over $HOST_DATA_DIR would take the database's data directory with it.
+      - ${HOST_DATA_DIR}/postgres:/mnt/pg-data
+      - ${HOST_DATA_DIR}/apps:/mnt/app-data
+      - ${HOST_LOG_DIR}/postgres:/mnt/pg-logs
+      - ${HOST_LOG_DIR}/apps:/mnt/app-logs
+
+  postgres:
+    image: docker.io/library/postgres:17
+    restart: unless-stopped
+    env_file:
+      - .env
+      - secrets.env
+    environment:
+      # POSTGRES_USER/PASSWORD/DB arrive from secrets.env, which is where the
+      # image looks for them -- so no credential is interpolated here.
+      #
+      # A sub-directory of the mount, not the mount point itself. PostgreSQL
+      # refuses to start unless its data directory is mode 0700, and a bind
+      # mount point's permissions are decided by the host (on macOS virtiofs
+      # they come out 0777). A directory *inside* the mount is created by
+      # initdb, so it gets the mode PostgreSQL insists on.
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    # Take the server's settings from the host-mounted config rather than from
+    # the copy initdb writes into the data directory, so tuning the database on
+    # a real host is an edit-and-restart rather than a compose change.
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    volumes:
+      # Host storage. On SELinux hosts (RHEL/Fedora) append `,Z` to each of
+      # these; on macOS/Windows podman machine the label is unnecessary.
+      - ${HOST_DATA_DIR}/postgres:/var/lib/postgresql/data
+      - ${HOST_LOG_DIR}/postgres:/var/log/postgresql
+      # Host-specific configuration, read-only (append `,z` under SELinux).
+      # postgresql.conf points hba_file and ident_file at its two companions,
+      # so all three must be mounted together.
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./config/pg_ident.conf:/etc/postgresql/pg_ident.conf:ro
+      # First-run bootstrap; only runs while the data directory is empty.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      init-storage:
+        condition: service_completed_successfully
+    ports:
+      # Bound to loopback so the lab database is reachable from psql on the
+      # host, but never from the network.
+      - "127.0.0.1:${POSTGRES_HOST_PORT}:5432"
+    healthcheck:
+      # -U/-d matter: without them pg_isready reports the *server* is up before
+      # the bootstrap has finished creating the application's database.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # Schema changes run once, here, rather than from inside the application.
+  # gunicorn starts several workers at once, so anything that creates tables at
+  # boot is a race the losers crash on -- which is why the old demo's
+  # `create_all` had to be wrapped in a try/except. A one-shot service gated by
+  # `service_completed_successfully`, the same pattern init-storage uses, means
+  # `web` cannot start against a schema that has not been brought up to date.
+  #
+  # It needs no data or log mounts: building the target metadata imports the
+  # installed apps' models and nothing else, with no Flask app in sight.
+  migrate:
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        # Stamped into the image and reported by /_status, so "is this running
+        # my code?" has an exact answer. scripts/up.sh supplies it.
+        GIT_SHA: ${GIT_SHA:-unknown}
+    image: localhost/${SITE_NAME:-podpack}-web:latest
+    restart: "no"
+    env_file:
+      - .env
+      - secrets.env
+    environment:
+      # SQLALCHEMY_DATABASE_URI comes from secrets.env.
+      PODPACK_CONFIG: /etc/holdenweb/app.toml
+    volumes:
+      - ./config/app.toml:/etc/holdenweb/app.toml:ro
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        # Stamped into the image and reported by /_status, so "is this running
+        # my code?" has an exact answer. scripts/up.sh supplies it.
+        GIT_SHA: ${GIT_SHA:-unknown}
+    image: localhost/${SITE_NAME:-podpack}-web:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+      - secrets.env
+    environment:
+      # SQLALCHEMY_DATABASE_URI comes from secrets.env -- the same variable
+      # name the real application uses, so the app code never has to know it is
+      # in a lab.
+      PODPACK_CONFIG: /etc/holdenweb/app.toml
+      # Roots, not per-app directories. podpack creates a subdirectory of each
+      # for every installed app, so nothing here changes when the app list
+      # does -- installing a feature stays an edit to app.toml and a restart.
+      PODPACK_DATA_ROOT: /var/lib/holdenweb/apps
+      PODPACK_LOG_ROOT: /var/log/holdenweb/apps
+    volumes:
+      # As above: add `,Z` to the writable mounts and `,z` to the read-only
+      # one on SELinux hosts. See README, "Running on Linux".
+      - ${HOST_DATA_DIR}/apps:/var/lib/holdenweb/apps
+      - ${HOST_LOG_DIR}/apps:/var/log/holdenweb/apps
+      - ./config/app.toml:/etc/holdenweb/app.toml:ro
+    ports:
+      # The external port is the one thing a host gets to dictate: Opalstack
+      # allocates it to an "Nginx Proxy Port" application and proxies the site
+      # to it, so deploying there is an edit of WEB_HOST_PORT in .env and
+      # nothing else. The address is settable too, because their own example
+      # publishes on all interfaces while a lab is better off on loopback --
+      # so which one is right belongs to the host, not to this file.
+      - "${WEB_BIND_ADDR:-127.0.0.1}:${WEB_HOST_PORT}:8000"
+    depends_on:
+      init-storage:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # A script, not a `python -c` one-liner: podman splits ["CMD", ...]
+      # arguments on whitespace, so any argument containing spaces arrives
+      # mangled. See container/healthcheck.py.
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
