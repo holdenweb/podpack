@@ -7,6 +7,7 @@ test). The canonical source tree is copied per-test when it must be
 mutated, so the installed package is never touched.
 """
 
+import json
 import os
 import shutil
 import stat
@@ -62,6 +63,11 @@ def verbs(actions: list[Action]) -> dict[str, str]:
     return {action.target: action.verb for action in actions}
 
 
+def all_verbs(actions: list[Action], target: str) -> list[str]:
+    """Every verb reported for one target: a file can draw more than one."""
+    return [action.verb for action in actions if action.target == target]
+
+
 # ---------------------------------------------------------------------------
 # init
 # ---------------------------------------------------------------------------
@@ -97,7 +103,7 @@ def test_init_refuses_to_run_twice(site: Path) -> None:
 
 
 def test_init_adopts_matching_files_without_rewriting_them(site: Path) -> None:
-    """A hand-copied substrate baselines silently; nothing is touched."""
+    """A hand-copied substrate baselines silently; contents are not touched."""
     params = Parameters.build("my_site")
     for entry in MANIFEST:
         target = site / entry.target
@@ -109,9 +115,30 @@ def test_init_adopts_matching_files_without_rewriting_them(site: Path) -> None:
     substrate.apply(actions, site)
 
     managed = [e for e in MANIFEST if e.kind in substrate.MANAGED_KINDS]
-    assert all(verbs(actions)[e.target] == "adopted" for e in managed)
+    reported: dict[str, list[str]] = {action.target: [] for action in actions}
+    for action in actions:
+        reported[action.target].append(action.verb)
+    assert all("adopted" in reported[e.target] for e in managed)
     after = {entry.target: (site / entry.target).stat().st_mtime_ns for entry in MANIFEST}
     assert before == after
+
+
+def test_adoption_restores_a_lost_executable_bit(site: Path) -> None:
+    """Byte-identical but not runnable is still broken, and `ok` for ever."""
+    params = Parameters.build("my_site")
+    for entry in MANIFEST:
+        target = site / entry.target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(render(entry, params, DATA_ROOT))   # no exec bits
+    assert not os.access(site / "scripts" / "up.sh", os.X_OK)
+
+    actions, state = plan_init(site, params, DATA_ROOT)
+    substrate.apply(actions, site)
+
+    assert os.access(site / "scripts" / "up.sh", os.X_OK)
+    assert (site / "scripts" / "up.sh").read_bytes() == render(
+        substrate._entry_for("scripts/up.sh"), params, DATA_ROOT
+    )
 
 
 def test_init_keeps_a_locally_edited_file_and_records_the_canonical_hash(site: Path) -> None:
@@ -187,8 +214,36 @@ def test_a_conflict_writes_dot_new_and_clobbers_nothing(site: Path, upstream: Pa
 
     assert edited.read_text().endswith("# mine\n")  # the site's copy untouched
     assert (site / "scripts" / "up.sh.new").read_text().endswith("# upstream\n")
-    # An unresolved conflict blocks convergence: the recorded version stays put.
-    assert state_of(site).podpack_version == substrate.podpack_version()
+
+
+def test_an_unresolved_conflict_blocks_the_recorded_version(
+    site: Path, upstream: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The version must not advance while work is pending.
+
+    Asserting it equals the installed version proves nothing when init
+    recorded that very version, so the installed one is moved first.
+    """
+    initialise(site)
+    recorded_at_init = state_of(site).podpack_version
+    edited = site / "scripts" / "up.sh"
+    edited.write_text(edited.read_text() + "# mine\n")
+    (upstream / "scripts" / "up.sh").write_text("# upstream\n")
+    monkeypatch.setattr(substrate, "podpack_version", lambda: "9.9.9")
+
+    actions, state, conflicts = plan_upgrade(site, state_of(site), upstream)
+    state.save(site)
+    assert conflicts == 1
+    assert state_of(site).podpack_version == recorded_at_init != "9.9.9"
+
+    # Resolving it lets the version move.
+    actions, state, conflicts = plan_upgrade(
+        site, state_of(site), upstream, take_upstream={"scripts/up.sh"}
+    )
+    substrate.apply(actions, site)
+    state.save(site)
+    assert conflicts == 0
+    assert state_of(site).podpack_version == "9.9.9"
 
 
 def test_take_upstream_and_keep_resolve_a_conflict_each_way(site: Path, upstream: Path) -> None:
@@ -224,6 +279,52 @@ def test_take_upstream_and_keep_resolve_a_conflict_each_way(site: Path, upstream
     actions, _, conflicts = plan_upgrade(site, state_of(site), upstream)
     assert conflicts == 0
     assert verbs(actions)["compose.yaml"] == "locally edited (kept)"
+
+
+def test_a_resolution_flag_only_resolves_a_conflict(site: Path, upstream: Path) -> None:
+    """Naming an unconflicted file used to act anyway, two ways round.
+
+    `--keep` on a clean file recorded the new baseline without writing, so the
+    upstream change was swallowed for ever; `--take-upstream` overwrote a site
+    edit nobody had been asked about.
+    """
+    initialise(site)
+    (upstream / "scripts" / "up.sh").write_text("# newer upstream\n")   # clean, updatable
+    edited = site / "compose.yaml"
+    edited.write_text(edited.read_text() + "# mine\n")                  # edited, no upstream change
+
+    actions, state, conflicts = plan_upgrade(
+        site, state_of(site), upstream,
+        keep={"scripts/up.sh"}, take_upstream={"compose.yaml"},
+    )
+    substrate.apply(actions, site)
+    state.save(site)
+
+    assert conflicts == 0
+    # Each says the flag did nothing, and then does the right thing anyway.
+    assert all_verbs(actions, "scripts/up.sh") == ["flag ignored", "updated"]
+    assert all_verbs(actions, "compose.yaml") == ["flag ignored", "locally edited (kept)"]
+    # The upstream fix landed rather than being acknowledged away...
+    assert (site / "scripts" / "up.sh").read_text() == "# newer upstream\n"
+    # ...and the site's unrelated edit survived.
+    assert edited.read_text().endswith("# mine\n")
+
+
+def test_a_symlinked_target_is_left_alone(site: Path, upstream: Path, tmp_path: Path) -> None:
+    """Writing would follow the link and land outside the site entirely."""
+    initialise(site)
+    outside = tmp_path / "elsewhere.conf"
+    outside.write_text("not podpack's to touch\n")
+    linked = site / "config" / "postgresql.conf"
+    linked.unlink()
+    linked.symlink_to(outside)
+    (upstream / "config" / "postgresql.conf").write_text("# newer\n")
+
+    actions, state, conflicts = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+
+    assert verbs(actions)["config/postgresql.conf"] == "symlinked (left alone)"
+    assert outside.read_text() == "not podpack's to touch\n"
 
 
 def test_a_deleted_managed_file_is_restored(site: Path) -> None:
@@ -431,6 +532,105 @@ def test_a_mistyped_diff_path_is_refused_rather_than_ignored(
 # ---------------------------------------------------------------------------
 # the dogfood pin, and packaging
 # ---------------------------------------------------------------------------
+
+
+def test_podpacks_own_append_is_not_reported_as_a_site_edit(
+    site: Path, upstream: Path
+) -> None:
+    initialise(site)
+    with (upstream / "env.example").open("a") as stream:
+        stream.write("\nNEW_KNOB=1\n")
+
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+    state.save(site)
+
+    lines, _ = substrate.status(site, state_of(site), upstream)
+    reported = next(line for line in lines if line.startswith(".env.example "))
+    assert "since edited" not in reported
+
+
+def secrets_line(lines: list[str]) -> str:
+    return next(line for line in lines if line.startswith("secrets.env "))
+
+
+def test_status_reports_a_secret_the_site_must_add(site: Path, upstream: Path) -> None:
+    """`status --check` must agree with what an upgrade would tell the site."""
+    initialise(site)
+    shutil.copy(site / "secrets.env.example", site / "secrets.env")
+    with (upstream / "secrets.env.example").open("a") as stream:
+        stream.write("\nAPI_TOKEN=lab-only\n")
+
+    lines, pending = substrate.status(site, state_of(site), upstream)
+    assert pending
+    assert secrets_line(lines).endswith("add by hand: API_TOKEN")
+
+
+def test_a_secret_managed_elsewhere_can_be_acknowledged(site: Path, upstream: Path) -> None:
+    """A commented-out entry is an answer; re-asking for ever is noise."""
+    initialise(site)
+    shutil.copy(site / "secrets.env.example", site / "secrets.env")
+    with (site / "secrets.env").open("a") as stream:
+        stream.write("# API_TOKEN= (kept in the vault)\n")
+    with (upstream / "secrets.env.example").open("a") as stream:
+        stream.write("\nAPI_TOKEN=lab-only\n")
+
+    lines, _ = substrate.status(site, state_of(site), upstream)
+    assert "API_TOKEN" not in secrets_line(lines)
+
+    actions, _, _ = plan_upgrade(site, state_of(site), upstream)
+    assert not any(a.target == "secrets.env" for a in actions)
+
+
+def test_adoption_reports_the_variables_it_will_not_add(
+    site: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Adoption treats a canon variable a site's copy lacks as its business --
+    which is only visible now, so it is said out loud."""
+    (site / ".env.example").write_text("SITE_NAME=mine\n")
+    initialise(site)
+    out = capsys.readouterr().out
+    assert "not adding what it lacks" in out
+    assert "GUNICORN_WORKERS" in out
+
+
+def test_a_state_file_from_a_newer_schema_is_refused(site: Path) -> None:
+    initialise(site)
+    raw = json.loads((site / "substrate.json").read_text())
+    raw["substrate_schema"] = substrate.STATE_SCHEMA + 1
+    (site / "substrate.json").write_text(json.dumps(raw))
+    with pytest.raises(RuntimeError, match="substrate schema"):
+        State.load(site)
+
+
+def test_init_refuses_a_directory_that_does_not_exist(tmp_path: Path) -> None:
+    """apply() creates parents, so a mistyped --dir would plant a whole tree."""
+    assert main(["substrate", "init", "--dir", str(tmp_path / "typo"), "--yes"]) == 2
+    assert not (tmp_path / "typo").exists()
+
+
+def test_the_site_package_is_derived_as_uv_build_would(tmp_path: Path) -> None:
+    """`My-Site` builds src/my_site/, so anything else names a module that
+    gunicorn cannot import."""
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    (site_dir / "pyproject.toml").write_text('[project]\nname = "My-Site"\nversion = "0"\n')
+    assert main(["substrate", "init", "--dir", str(site_dir), "--yes"]) == 0
+    assert "'my_site:create_app()'" in (site_dir / "Containerfile").read_text()
+
+
+def test_the_shipped_python_still_compiles() -> None:
+    """The substrate's own .py files are data here and code in a site.
+
+    They are outside mypy's reach by design, so this is the floor: a site's
+    alembic environment that does not even parse is exactly the failure
+    holdenweb.com shipped for months in a file nothing imported.
+    """
+    for entry in MANIFEST:
+        if not entry.source.endswith(".py"):
+            continue
+        source = (DATA_ROOT / entry.source).read_text()
+        compile(source, entry.source, "exec")
 
 
 def test_the_repo_root_is_the_rendered_substrate() -> None:

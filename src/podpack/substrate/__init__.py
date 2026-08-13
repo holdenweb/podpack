@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from importlib.metadata import version as _distribution_version
@@ -201,10 +202,31 @@ class State:
         if not path.is_file():
             return None
         raw = json.loads(path.read_text())
+        # A newer podpack may record things this one would misread -- a site
+        # pin rolled back, most plausibly. Refusing beats interpreting a
+        # schema-2 file under schema-1 assumptions and writing the result.
+        schema = raw.get("substrate_schema", 0)
+        if schema > STATE_SCHEMA:
+            raise RuntimeError(
+                f"{path} was written with substrate schema {schema}, and this "
+                f"podpack understands {STATE_SCHEMA}. Upgrade podpack, or "
+                f"restore the {STATE_FILE} that matches the pinned version."
+            )
+        missing = {"podpack_version", "parameters", "files"} - set(raw)
+        if missing:
+            raise RuntimeError(
+                f"{path} is missing {', '.join(sorted(missing))}. It is written "
+                "by `podpack substrate` and not meant to be edited by hand; "
+                "restore it from version control."
+            )
         return State(
             podpack_version=raw["podpack_version"],
             parameters=raw["parameters"],
             files=raw["files"],
+            # Absent means "nothing has been delivered", which is only true of
+            # a file podpack has never seen; every state it writes carries the
+            # key, so a missing one is an edited file and the checks above have
+            # already had their say.
             delivered_vars=raw.get("delivered_vars", {}),
         )
 
@@ -310,6 +332,12 @@ def plan_init(site_dir: Path, params: Parameters, root: Traversable | Path) -> t
                                       executable=entry.executable))
             elif target.read_bytes() == rendered:
                 actions.append(Action(entry.target, "adopted"))
+                if entry.executable and not os.access(target, os.X_OK):
+                    # Byte-identical but not runnable: a copy that travelled
+                    # through something which drops the mode bit would be
+                    # baselined `ok` for ever while podman fails to run it.
+                    actions.append(Action(entry.target, "made executable",
+                                          executable=True))
             else:
                 actions.append(Action(
                     entry.target, "kept local version",
@@ -326,12 +354,26 @@ def plan_init(site_dir: Path, params: Parameters, root: Traversable | Path) -> t
                 record["sha256"] = sha256(target.read_bytes())
                 record["seeded_by"] = "pre-existing"
             if entry.kind == CONFIG:
-                delivered = set(env_var_names(rendered.decode("utf-8")))
+                canon_names = env_var_names(rendered.decode("utf-8"))
+                delivered = set(canon_names)
                 if target.exists():
                     # Anything the site already defines counts as delivered:
                     # upgrade must never push a variable back at a site that
-                    # has it, or had it and removed it.
-                    delivered |= set(env_var_names(target.read_text()))
+                    # has it, or had it and removed it. Adoption cannot tell
+                    # "deleted deliberately" from "never had it", and treats
+                    # both as the site's business -- so a canonical variable
+                    # its copy lacks is recorded as delivered and never
+                    # appended. Reported rather than silent, because the
+                    # difference is only visible now.
+                    site_names = set(env_var_names(target.read_text()))
+                    delivered |= site_names
+                    absent = [n for n in canon_names if n not in site_names]
+                    if absent:
+                        actions.append(Action(
+                            entry.target, "not adding what it lacks",
+                            detail="podpack's copy also defines "
+                                   + ", ".join(absent),
+                        ))
                 state.delivered_vars[entry.target] = sorted(delivered)
 
         state.files[entry.target] = record
@@ -396,37 +438,76 @@ def plan_upgrade(
             disk = target.read_bytes() if target.exists() else None
             record = {"class": entry.kind, "sha256": render_hash}
 
-            if entry.target in take_upstream:
+            # A symlink is the site pointing this file somewhere of its own.
+            # Writing would follow the link and land outside the site -- the
+            # one thing walking a manifest is supposed to make impossible --
+            # so report it and touch nothing.
+            if target.is_symlink():
+                actions.append(Action(
+                    entry.target, "symlinked (left alone)",
+                    detail=f"points at {os.readlink(target)}",
+                ))
+                record["sha256"] = baseline if baseline else render_hash
+                state.files[entry.target] = record
+                continue
+
+            # The three-way decision comes first, so that a resolution flag
+            # can only ever resolve something. Naming a file that is *not* in
+            # conflict used to act anyway: --keep recorded the new baseline
+            # without writing, swallowing the upstream change for ever, and
+            # --take-upstream overwrote a site edit that nothing had asked
+            # about.
+            if disk is None:
+                decision = "restored"
+            elif sha256(disk) == baseline:
+                decision = "ok" if render_hash == baseline else "updated"
+            elif sha256(disk) == render_hash:
+                decision = "already matches new version"
+            elif render_hash == baseline:
+                decision = "locally edited (kept)"
+            else:
+                decision = "conflict"
+
+            named = entry.target in take_upstream or entry.target in keep
+            if named and decision != "conflict":
+                actions.append(Action(
+                    entry.target, "flag ignored",
+                    detail=f"not in conflict ({decision})",
+                ))
+            elif decision == "conflict" and entry.target in take_upstream:
                 actions.append(Action(entry.target, "took upstream", content=rendered,
                                       executable=entry.executable))
                 _drop_stale_new(actions, site_dir, entry.target)
-            elif entry.target in keep:
+                decision = "resolved"
+            elif decision == "conflict" and entry.target in keep:
                 # The site's edit wins; advancing the baseline acknowledges
                 # the upstream change without applying it. The .new copy goes
                 # either way -- a resolved conflict should leave no artifact,
                 # and one left behind would quietly go stale.
                 actions.append(Action(entry.target, "kept (upstream acknowledged)"))
                 _drop_stale_new(actions, site_dir, entry.target)
-            elif disk is None:
-                actions.append(Action(entry.target, "restored", content=rendered,
+                decision = "resolved"
+
+            if decision in ("restored", "updated"):
+                actions.append(Action(entry.target, decision, content=rendered,
                                       executable=entry.executable))
-            elif sha256(disk) == baseline:
-                if render_hash == baseline:
-                    actions.append(Action(entry.target, "ok"))
-                else:
-                    actions.append(Action(entry.target, "updated", content=rendered,
-                                          executable=entry.executable))
-            elif sha256(disk) == render_hash:
-                actions.append(Action(entry.target, "already matches new version"))
-            elif render_hash == baseline:
-                actions.append(Action(entry.target, "locally edited (kept)"))
+            elif decision in ("ok", "already matches new version"):
+                actions.append(Action(entry.target, decision))
+                if entry.executable and not os.access(target, os.X_OK):
+                    # A hand-copied script that arrived without its exec bit
+                    # is byte-identical and would otherwise be baselined `ok`
+                    # for ever, while podman fails to run it.
+                    actions.append(Action(entry.target, "made executable",
+                                          executable=True))
+            elif decision == "locally edited (kept)":
+                actions.append(Action(entry.target, decision))
                 record["sha256"] = baseline
-            else:
+            elif decision == "conflict":
                 conflicts += 1
                 actions.append(Action(
                     entry.target, "conflict",
-                    detail=f"wrote {entry.target}.new -- resolve with "
-                           f"--take-upstream or --keep",
+                    detail=f"podpack's version goes to {entry.target}.new -- "
+                           f"resolve with --take-upstream or --keep",
                     content=rendered,
                 ))
                 # Baseline stays put: the conflict is unresolved.
@@ -465,8 +546,7 @@ def plan_upgrade(
     secrets = site_dir / "secrets.env"
     if secrets.is_file():
         canon = render(_entry_for("secrets.env.example"), params, root).decode("utf-8")
-        missing = [name for name in env_var_names(canon)
-                   if name not in set(env_var_names(secrets.read_text()))]
+        missing = _missing_secrets(secrets.read_text(), canon)
         if missing:
             actions.append(Action(
                 "secrets.env", "needs new secrets",
@@ -511,9 +591,33 @@ def _plan_var_delivery(
         f"\n# --- added by podpack substrate upgrade (podpack {version}) ---\n"
         + "\n\n".join(additions) + "\n"
     )
+    # Re-baseline to what the file becomes, so podpack's own append is not
+    # reported back to the site as "since edited" -- the one edit it can be
+    # sure the site did not make.
+    record = state.files.get(target_name)
+    if record is not None:
+        record["sha256"] = sha256(target.read_bytes() + text.encode("utf-8"))
     return [Action(target_name, "appended new variables",
                    detail=", ".join(n for n in pending),
                    content=text.encode("utf-8"))]
+
+
+def _missing_secrets(live: str, canon: str) -> list[str]:
+    """Canonical secrets this site's file does not account for.
+
+    A commented-out definition counts as accounted for: a site that manages a
+    secret elsewhere -- a vault, the platform's own store -- and left
+    `# API_TOKEN=` behind as a note has answered the question, and reporting
+    it on every upgrade for ever would be the kind of noise that teaches
+    people to skip the report entirely.
+    """
+    known = set(env_var_names(live))
+    for line in live.splitlines():
+        stripped = line.lstrip().lstrip("#").lstrip()
+        match = _VAR_LINE_RE.match(stripped)
+        if line.lstrip().startswith("#") and match:
+            known.add(match.group(1))
+    return [name for name in env_var_names(canon) if name not in known]
 
 
 def _drop_stale_new(actions: list[Action], site_dir: Path, target: str) -> None:
@@ -533,13 +637,24 @@ def apply(actions: list[Action], site_dir: Path) -> None:
         if action.verb in ("write", "updated", "restored", "took upstream"):
             assert action.content is not None
             target.parent.mkdir(parents=True, exist_ok=True)
+            # Belt and braces with the symlink check in the plan: writing
+            # through a link would put bytes outside the site directory, which
+            # walking a manifest is meant to make impossible.
+            if target.is_symlink():
+                continue
             target.write_bytes(action.content)
             if action.executable:
                 target.chmod(target.stat().st_mode | 0o755)
+        elif action.verb == "made executable":
+            target.chmod(target.stat().st_mode | 0o755)
         elif action.verb == "conflict":
             assert action.content is not None
             new_path = site_dir / f"{action.target}.new"
-            new_path.write_bytes(action.content)
+            # Idempotent: a re-run of the same unresolved conflict rewrites
+            # nothing, so a copy the site has been reading (or hand-merging)
+            # keeps its timestamp.
+            if not new_path.exists() or new_path.read_bytes() != action.content:
+                new_path.write_bytes(action.content)
         elif action.verb == "appended new variables":
             assert action.content is not None
             with target.open("ab") as stream:
@@ -619,5 +734,18 @@ def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list
             lines.append(f"{'.env':32} new variables pending: {', '.join(undelivered)}")
         else:
             lines.append(f"{'.env':32} ok (append-only)")
+
+    # Likewise secrets.env, which upgrade reports on but never writes. Leaving
+    # it out made `status --check` say "nothing to do" while an upgrade would
+    # have told the site it was missing a required secret.
+    secrets = site_dir / "secrets.env"
+    if secrets.is_file():
+        canon = render(_entry_for("secrets.env.example"), params, root).decode("utf-8")
+        missing = _missing_secrets(secrets.read_text(), canon)
+        if missing:
+            pending = True
+            lines.append(f"{'secrets.env':32} add by hand: {', '.join(missing)}")
+        else:
+            lines.append(f"{'secrets.env':32} ok (never written by podpack)")
 
     return lines, pending

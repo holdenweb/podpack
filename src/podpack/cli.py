@@ -102,8 +102,14 @@ def _report(actions: list[Action]) -> None:
 
 
 def _derive_site_package(site_dir: Path) -> str | None:
-    """The site's import name, the way uv_build derives it: [project] name
-    with runs of dots and dashes becoming single underscores."""
+    """The site's import name, the way uv_build derives it.
+
+    Normalisation is PEP 503's, then dashes to underscores: runs of `-`, `_`
+    and `.` collapse to one underscore, and the result is lower-cased --
+    verified against uv_build, which builds `src/my_site/` for a project
+    named `My-Site`. Deriving `My_Site` instead would put a module name in
+    the Containerfile that gunicorn cannot import.
+    """
     pyproject = site_dir / "pyproject.toml"
     if not pyproject.is_file():
         return None
@@ -112,11 +118,16 @@ def _derive_site_package(site_dir: Path) -> str | None:
     name = data.get("project", {}).get("name")
     if not isinstance(name, str) or not name:
         return None
-    return re.sub(r"[-.]+", "_", name)
+    return re.sub(r"[-_.]+", "_", name).lower()
 
 
 def _init(args: argparse.Namespace) -> int:
     site_dir = _site_dir(args)
+    if not site_dir.is_dir():
+        # apply() creates missing parents, so a mistyped --dir would otherwise
+        # plant a complete substrate somewhere nobody asked for and exit 0.
+        print(f"{site_dir} is not a directory -- create the site first")
+        return 2
     if State.load(site_dir) is not None:
         print(f"{substrate.STATE_FILE} already exists here -- this site is "
               "initialised; `podpack substrate upgrade` is the command that "
