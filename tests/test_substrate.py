@@ -301,12 +301,26 @@ def test_a_resolution_flag_only_resolves_a_conflict(site: Path, upstream: Path) 
     state.save(site)
 
     assert conflicts == 0
-    # Each says the flag did nothing, and then does the right thing anyway.
+    # --keep on an unmodified file has nothing to resolve, and saying so is
+    # what stops the upstream fix being frozen out.
     assert all_verbs(actions, "scripts/up.sh") == ["flag ignored", "updated"]
-    assert all_verbs(actions, "compose.yaml") == ["flag ignored", "locally edited (kept)"]
-    # The upstream fix landed rather than being acknowledged away...
     assert (site / "scripts" / "up.sh").read_text() == "# newer upstream\n"
-    # ...and the site's unrelated edit survived.
+    # --take-upstream on a locally edited file IS meaningful: the site is
+    # explicitly asking to discard its edit, which is how a copy adopted with
+    # local differences converges.
+    assert all_verbs(actions, "compose.yaml") == ["took upstream"]
+    assert not edited.read_text().endswith("# mine\n")
+
+
+def test_take_upstream_discards_an_edit_only_when_asked(site: Path) -> None:
+    """Left unnamed, the same edit survives every upgrade."""
+    initialise(site)
+    edited = site / "compose.yaml"
+    edited.write_text(edited.read_text() + "# mine\n")
+
+    actions, state, _ = plan_upgrade(site, state_of(site), DATA_ROOT)
+    substrate.apply(actions, site)
+    assert verbs(actions)["compose.yaml"] == "locally edited (kept)"
     assert edited.read_text().endswith("# mine\n")
 
 

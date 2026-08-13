@@ -468,13 +468,21 @@ def plan_upgrade(
             else:
                 decision = "conflict"
 
-            named = entry.target in take_upstream or entry.target in keep
-            if named and decision != "conflict":
+            # --take-upstream answers "discard what this site has here", so it
+            # applies wherever the site's copy differs -- a conflict, or an
+            # edit made before adoption. --keep answers "my edit wins over
+            # this incoming change", which only a conflict poses; on an
+            # unmodified file it would freeze the copy at the old version
+            # while recording the new baseline, silently losing the update.
+            takeable = decision in ("conflict", "locally edited (kept)")
+            named_take = entry.target in take_upstream
+            named_keep = entry.target in keep
+            if (named_take and not takeable) or (named_keep and decision != "conflict"):
                 actions.append(Action(
                     entry.target, "flag ignored",
-                    detail=f"not in conflict ({decision})",
+                    detail=f"nothing to resolve ({decision})",
                 ))
-            elif decision == "conflict" and entry.target in take_upstream:
+            elif named_take:
                 actions.append(Action(entry.target, "took upstream", content=rendered,
                                       executable=entry.executable))
                 _drop_stale_new(actions, site_dir, entry.target)
