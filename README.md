@@ -504,7 +504,9 @@ in that file would be a weak credential on its way to production.
 
 Out of the command's reach, always: `config/app.toml`, `alembic/versions/`,
 `pyproject.toml`, the lockfile, your source, and anything in `scripts/` it
-did not put there. See
+did not put there — though the seeded `.gitignore` suggests `scratch/` for
+your own experiments and one-off utilities, so that `scripts/` can hold
+only the two files podpack manages. See
 [ADR-0026](adrs/0026-the-substrate-ships-in-the-package-and-upgrades-by-manifest.md)
 for the full rules and what was rejected.
 

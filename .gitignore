@@ -10,3 +10,10 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 dist/
+
+# Personal working files -- experiments, one-off utilities, notes to self.
+# Kept here rather than in scripts/, which holds only the files `podpack
+# substrate` manages. The separation is not load-bearing -- the engine walks
+# a manifest and never sweeps a directory -- but a mixed directory is an
+# invitation to a mistake nobody needs.
+scratch/
