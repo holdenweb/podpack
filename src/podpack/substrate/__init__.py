@@ -116,13 +116,16 @@ class Parameters:
 
     site_package: str
     site_name: str
-    web_port: int = 8458
-    db_port: int = 5433
+    web_port: int | None = None
+    db_port: int | None = None
     db_name: str = ""
     db_user: str = ""
     db_password: str = ""
 
     RECORDED = ("site_package", "site_name", "web_port", "db_port", "db_name", "db_user")
+
+    DEFAULT_WEB_PORT = 8458
+    DEFAULT_DB_PORT = 5433
 
     @staticmethod
     def build(site_package: str, **overrides: Any) -> "Parameters":
@@ -130,6 +133,8 @@ class Parameters:
         dashed = site_package.replace("_", "-")
         values: dict[str, Any] = {
             "site_name": dashed,
+            "web_port": Parameters.DEFAULT_WEB_PORT,
+            "db_port": Parameters.DEFAULT_DB_PORT,
             "db_name": site_package,
             "db_user": f"{site_package}_app",
             "db_password": f"{dashed}-app-password",  # a lab value, like the seeds'
@@ -141,8 +146,13 @@ class Parameters:
     def from_state(recorded: dict[str, str]) -> "Parameters":
         """Rebuild from substrate.json, leaving what was not recorded unset.
 
-        State files written before a parameter was recorded simply lack it,
-        so each is defaulted individually rather than assumed present.
+        Deliberately *not* `build()`: that fills defaults, which is right when
+        a site is being created and wrong when its state file is being read.
+        A state written before a parameter was recorded does not tell us the
+        site chose the default -- it tells us nothing -- and inventing 8458 or
+        `<pkg>_app` there is how a later delivery writes a plausible wrong
+        value into a live file. Unset instead, so the token survives and
+        delivery marks it CHANGEME.
         """
         values: dict[str, Any] = {
             key: recorded[key] for key in Parameters.RECORDED if key in recorded
@@ -151,8 +161,8 @@ class Parameters:
         for key in ("web_port", "db_port"):
             if key in values:
                 values[key] = int(values[key])
-        # Never recorded, so it stays unresolved rather than being re-derived.
-        return Parameters.build(site_package, db_password="", **values)
+        return Parameters(site_package=site_package, site_name=values.pop("site_name", ""),
+                          **values)
 
     def recorded(self) -> dict[str, str]:
         return {key: str(getattr(self, key)) for key in self.RECORDED}
@@ -167,8 +177,8 @@ class Parameters:
         candidates = {
             "@@SITE_PACKAGE@@": self.site_package,
             "@@SITE_NAME@@": self.site_name,
-            "@@WEB_HOST_PORT@@": str(self.web_port),
-            "@@POSTGRES_HOST_PORT@@": str(self.db_port),
+            "@@WEB_HOST_PORT@@": str(self.web_port) if self.web_port else "",
+            "@@POSTGRES_HOST_PORT@@": str(self.db_port) if self.db_port else "",
             "@@DB_NAME@@": self.db_name,
             "@@DB_USER@@": self.db_user,
             "@@DB_PASSWORD@@": self.db_password,
@@ -244,6 +254,35 @@ class State:
 
 def podpack_version() -> str:
     return _distribution_version("podpack")
+
+
+def escapes(site_dir: Path, target: Path) -> str | None:
+    """Where `target` really lands, if that is outside the site.
+
+    Testing the leaf for a symlink is not enough and was the first attempt: a
+    site that points `config/` or `scripts/` at a shared checkout has an
+    ordinary path with a symlinked *parent*, and writing followed it straight
+    out of the site. Resolving the whole path is the only check that holds,
+    and it covers the dangling link, the link-to-a-directory and the
+    hand-planted `.new` symlink in the same breath.
+    """
+    root = site_dir.resolve()
+    try:
+        resolved = target.resolve()
+    except OSError:
+        return str(target)
+    if resolved == root or root in resolved.parents:
+        return None
+    return str(resolved)
+
+
+def unusable(target: Path) -> str | None:
+    """Why this path cannot be treated as the file it is supposed to be."""
+    if target.exists() and not target.is_file():
+        return "not a regular file"
+    if target.is_symlink() and not target.exists():
+        return "a dangling symlink"
+    return None
 
 
 def source_root() -> Traversable | Path:
@@ -325,6 +364,21 @@ def plan_init(site_dir: Path, params: Parameters, root: Traversable | Path) -> t
         target = site_dir / entry.target
         rendered = render(entry, params, root)
         record: dict[str, Any] = {"class": entry.kind, "sha256": sha256(rendered)}
+
+        # Before anything reads or writes: a path that resolves outside the
+        # site is not this site's to manage, and init is the first command a
+        # new site runs -- the worst possible moment to follow a link out.
+        outside = escapes(site_dir, target)
+        broken = unusable(target)
+        if outside or broken:
+            actions.append(Action(
+                entry.target, "not managed here",
+                detail=f"resolves outside the site ({outside})" if outside
+                       else f"is {broken}",
+            ))
+            record["unmanaged"] = True
+            state.files[entry.target] = record
+            continue
 
         if entry.kind in MANAGED_KINDS:
             if not target.exists():
@@ -433,23 +487,30 @@ def plan_upgrade(
         rendered = render(entry, params, root)
 
         if entry.kind in MANAGED_KINDS:
-            baseline = record["sha256"] if record else None
+            baseline = record.get("sha256") if record else None
             render_hash = sha256(rendered)
-            disk = target.read_bytes() if target.exists() else None
             record = {"class": entry.kind, "sha256": render_hash}
 
-            # A symlink is the site pointing this file somewhere of its own.
-            # Writing would follow the link and land outside the site -- the
-            # one thing walking a manifest is supposed to make impossible --
-            # so report it and touch nothing.
-            if target.is_symlink():
+            # Checked before anything reads the path: a site that points this
+            # file -- or the directory holding it -- somewhere of its own has
+            # taken it out of podpack's hands, and following the link would
+            # write outside the site, which walking a manifest is supposed to
+            # make impossible. Recorded as unmanaged so that saying so once is
+            # not the same as reporting work that will never happen.
+            outside = escapes(site_dir, target)
+            broken = unusable(target)
+            if outside or broken:
                 actions.append(Action(
-                    entry.target, "symlinked (left alone)",
-                    detail=f"points at {os.readlink(target)}",
+                    entry.target, "not managed here",
+                    detail=f"resolves outside the site ({outside})" if outside
+                           else f"is {broken}",
                 ))
                 record["sha256"] = baseline if baseline else render_hash
+                record["unmanaged"] = True
                 state.files[entry.target] = record
                 continue
+
+            disk = target.read_bytes() if target.exists() else None
 
             # The three-way decision comes first, so that a resolution flag
             # can only ever resolve something. Naming a file that is *not* in
@@ -483,9 +544,17 @@ def plan_upgrade(
                     detail=f"nothing to resolve ({decision})",
                 ))
             elif named_take:
+                # The site's version is kept beside the file rather than
+                # simply lost: `--take-upstream` is an explicit request, but
+                # "nothing is ever clobbered" is a promise the whole design
+                # rests on, and a discarded edit is exactly the thing nobody
+                # can reconstruct.
+                if disk is not None and disk != rendered:
+                    actions.append(Action(f"{entry.target}.orig", "saved your version",
+                                          content=disk))
                 actions.append(Action(entry.target, "took upstream", content=rendered,
                                       executable=entry.executable))
-                _drop_stale_new(actions, site_dir, entry.target)
+                _drop_stale_new(actions, site_dir, entry.target, rendered)
                 decision = "resolved"
             elif decision == "conflict" and entry.target in keep:
                 # The site's edit wins; advancing the baseline acknowledges
@@ -493,7 +562,7 @@ def plan_upgrade(
                 # either way -- a resolved conflict should leave no artifact,
                 # and one left behind would quietly go stale.
                 actions.append(Action(entry.target, "kept (upstream acknowledged)"))
-                _drop_stale_new(actions, site_dir, entry.target)
+                _drop_stale_new(actions, site_dir, entry.target, rendered)
                 decision = "resolved"
 
             if decision in ("restored", "updated"):
@@ -501,6 +570,10 @@ def plan_upgrade(
                                       executable=entry.executable))
             elif decision in ("ok", "already matches new version"):
                 actions.append(Action(entry.target, decision))
+                # A conflict the site resolved by hand -- copying the .new
+                # over, the obvious move -- leaves the artifact behind to go
+                # stale and be committed. Clear it once the file agrees.
+                _drop_stale_new(actions, site_dir, entry.target, rendered)
                 if entry.executable and not os.access(target, os.X_OK):
                     # A hand-copied script that arrived without its exec bit
                     # is byte-identical and would otherwise be baselined `ok`
@@ -576,6 +649,12 @@ def _plan_var_delivery(
     parameter init consumed and did not record) surface as CHANGEME.
     """
     target = site_dir / target_name
+    outside = escapes(site_dir, target)
+    if outside:
+        # Appending follows a link exactly as writing does, and `is_file()`
+        # says nothing about where the file is.
+        return [Action(target_name, "not managed here",
+                       detail=f"resolves outside the site ({outside})")]
     if not target.is_file():
         return [Action(target_name, "removed by site (left alone)")]
     delivered = set(state.delivered_vars.get(target_name, []))
@@ -601,10 +680,13 @@ def _plan_var_delivery(
     )
     # Re-baseline to what the file becomes, so podpack's own append is not
     # reported back to the site as "since edited" -- the one edit it can be
-    # sure the site did not make.
+    # sure the site did not make. Only where the file was otherwise unedited,
+    # though: rolling the baseline forward on a file the site had changed
+    # would clear its drift report as a side effect of an unrelated delivery.
     record = state.files.get(target_name)
-    if record is not None:
-        record["sha256"] = sha256(target.read_bytes() + text.encode("utf-8"))
+    current = target.read_bytes()
+    if record is not None and record.get("sha256") == sha256(current):
+        record["sha256"] = sha256(current + text.encode("utf-8"))
     return [Action(target_name, "appended new variables",
                    detail=", ".join(n for n in pending),
                    content=text.encode("utf-8"))]
@@ -628,9 +710,26 @@ def _missing_secrets(live: str, canon: str) -> list[str]:
     return [name for name in env_var_names(canon) if name not in known]
 
 
-def _drop_stale_new(actions: list[Action], site_dir: Path, target: str) -> None:
-    if (site_dir / f"{target}.new").exists():
+def _drop_stale_new(
+    actions: list[Action], site_dir: Path, target: str, rendered: bytes
+) -> None:
+    """Clear the conflict artifact, unless the site has made it its own.
+
+    The conflict message invites reading `<file>.new`, and some people merge
+    into it. Deleting only what podpack itself wrote keeps that work safe --
+    and a copy that no longer matches podpack's version is, by definition,
+    somebody's edit.
+    """
+    path = site_dir / f"{target}.new"
+    if not path.is_file():
+        return
+    if path.read_bytes() == rendered:
         actions.append(Action(f"{target}.new", "removed (conflict resolved)"))
+    else:
+        actions.append(Action(
+            f"{target}.new", "left alone",
+            detail="you have edited it; delete it when you are done",
+        ))
 
 
 # ---------------------------------------------------------------------------
@@ -638,17 +737,32 @@ def _drop_stale_new(actions: list[Action], site_dir: Path, target: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+WRITE_VERBS = ("write", "updated", "restored", "took upstream", "saved your version")
+
+
 def apply(actions: list[Action], site_dir: Path) -> None:
-    """Execute a plan. Writing is the only side effect; verbs say the rest."""
+    """Execute a plan. Writing is the only side effect; verbs say the rest.
+
+    Every mutation re-checks containment. The plans already refuse a path
+    that resolves outside the site, so this is belt and braces -- but it is
+    the only place bytes actually move, and a guard on the wrong side of
+    `parent.mkdir` is how the first attempt let a symlinked directory
+    through.
+    """
     for action in actions:
         target = site_dir / action.target
-        if action.verb in ("write", "updated", "restored", "took upstream"):
+        mutates = action.verb in WRITE_VERBS or action.verb in (
+            "made executable", "conflict", "appended new variables",
+            "removed (conflict resolved)",
+        )
+        if mutates and escapes(site_dir, target if action.verb != "conflict"
+                               else site_dir / f"{action.target}.new"):
+            continue
+
+        if action.verb in WRITE_VERBS:
             assert action.content is not None
             target.parent.mkdir(parents=True, exist_ok=True)
-            # Belt and braces with the symlink check in the plan: writing
-            # through a link would put bytes outside the site directory, which
-            # walking a manifest is meant to make impossible.
-            if target.is_symlink():
+            if escapes(site_dir, target):   # the mkdir may have made it so
                 continue
             target.write_bytes(action.content)
             if action.executable:
@@ -668,7 +782,7 @@ def apply(actions: list[Action], site_dir: Path) -> None:
             with target.open("ab") as stream:
                 stream.write(action.content)
         elif action.verb == "removed (conflict resolved)":
-            (site_dir / action.target).unlink(missing_ok=True)
+            target.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -688,6 +802,17 @@ def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list
         baseline = record.get("sha256")
         rendered = render(entry, params, root)
         render_hash = sha256(rendered)
+
+        # Reported as a settled fact, not as pending work: a file the site has
+        # pointed elsewhere is one podpack cannot manage, and a check that can
+        # never go green is a check nobody keeps.
+        outside = escapes(site_dir, target)
+        broken = unusable(target)
+        if outside or broken:
+            word = f"not managed here ({'outside the site' if outside else broken})"
+            lines.append(f"{entry.target:32} {word}")
+            continue
+
         disk_hash = sha256(target.read_bytes()) if target.exists() else None
 
         if entry.kind in MANAGED_KINDS:
@@ -730,11 +855,16 @@ def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list
     # -- but it does receive new variables, so leaving it out of the report
     # would hide the one thing an upgrade will do to it.
     live_env = site_dir / ".env"
-    if live_env.is_file():
+    if live_env.is_file() and not escapes(site_dir, live_env):
         example = render(_entry_for(".env.example"), params, root).decode("utf-8")
+        # The same seeding upgrade applies on first sighting, or status would
+        # report every variable the site trimmed from .env as pending work
+        # that an upgrade then declines to do.
+        delivered = set(state.delivered_vars.get(".env")
+                        or state.delivered_vars.get(".env.example", []))
         undelivered = [
             name for name in env_var_names(example)
-            if name not in set(state.delivered_vars.get(".env", []))
+            if name not in delivered
             and name not in set(env_var_names(live_env.read_text()))
         ]
         if undelivered:

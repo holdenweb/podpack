@@ -73,7 +73,9 @@ def _build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument("--dir", default=".")
     upgrade.add_argument("--dry-run", action="store_true", help="report without writing")
     upgrade.add_argument("--take-upstream", action="append", default=[], metavar="PATH",
-                         help="resolve a conflict by taking podpack's version of PATH")
+                         help="take podpack's version of PATH, whether it conflicts "
+                              "or you had simply edited it; your version is kept "
+                              "beside it as PATH.orig")
     upgrade.add_argument("--keep", action="append", default=[], metavar="PATH",
                          help="resolve a conflict by keeping the site's PATH as-is")
 
@@ -170,7 +172,17 @@ def _init(args: argparse.Namespace) -> int:
 
 
 def _load_or_complain(site_dir: Path) -> State | None:
-    state = State.load(site_dir)
+    """The state, or None with the reason printed.
+
+    Every "cannot proceed" here exits 2, which is what separates a damaged
+    state file from `upgrade`'s exit 1 for conflicts to resolve -- a CI gate
+    keyed on 1 would otherwise read corruption as ordinary pending work.
+    """
+    try:
+        state = State.load(site_dir)
+    except (RuntimeError, ValueError, KeyError) as exc:
+        print(f"cannot read {substrate.STATE_FILE}: {exc}")
+        return None
     if state is None:
         print(f"no {substrate.STATE_FILE} here -- run `podpack substrate init` first")
     return state
@@ -189,6 +201,12 @@ def _upgrade(args: argparse.Namespace) -> int:
         return 2
     # A mistyped path would otherwise match nothing and vanish, leaving the
     # conflict it was meant to resolve reported again with no hint why.
+    both = sorted(set(args.take_upstream) & set(args.keep))
+    if both:
+        # Branch order would decide it silently, and the loser is the site's
+        # own version -- so the contradiction is a usage error, not a race.
+        print("named in both --take-upstream and --keep: " + ", ".join(both))
+        return 2
     unknown = _unknown_targets(args.take_upstream + args.keep)
     if unknown:
         print("not managed substrate files: " + ", ".join(unknown))

@@ -468,8 +468,16 @@ baseline of **what podpack rendered**: files you have not touched take
 upstream fixes; files you edited are kept, and said so; a file changed on
 both sides gets podpack's version written *beside* it as `<file>.new` and an
 exit status of 1 — resolve each with `--take-upstream PATH` or `--keep
-PATH`. Nothing is ever clobbered. `status --check` exits 1 if an upgrade
-would act, which is the CI hook.
+PATH`. `--take-upstream` also discards an edit you made earlier, which is how
+a site adopted with local differences converges; either way your version is
+kept as `<file>.orig`, because **nothing is ever clobbered**. `status
+--check` exits 1 if an upgrade would act, which is the CI hook; a damaged
+`substrate.json` exits 2, so the two are never confused.
+
+A file that resolves **outside the site** — because you pointed it, or the
+directory holding it, at a shared checkout — is reported as `not managed
+here` and left entirely alone, in every command. That is a settled fact
+rather than pending work, so it does not hold `--check` red for ever.
 
 Configuration is different, by design: once delivered, `.env.example`,
 `secrets.env.example` and a live `.env` change **only by the addition of new

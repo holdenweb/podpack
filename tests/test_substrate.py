@@ -337,8 +337,85 @@ def test_a_symlinked_target_is_left_alone(site: Path, upstream: Path, tmp_path: 
     actions, state, conflicts = plan_upgrade(site, state_of(site), upstream)
     substrate.apply(actions, site)
 
-    assert verbs(actions)["config/postgresql.conf"] == "symlinked (left alone)"
+    assert verbs(actions)["config/postgresql.conf"] == "not managed here"
     assert outside.read_text() == "not podpack's to touch\n"
+
+
+def test_a_symlinked_parent_directory_cannot_be_written_through(
+    site: Path, upstream: Path, tmp_path: Path
+) -> None:
+    """The leaf is an ordinary path; only resolving the whole of it helps.
+
+    Pointing `scripts/` or `config/` at a shared checkout is an ordinary
+    arrangement, and a guard that asks the leaf whether it is a symlink sees
+    nothing wrong with it.
+    """
+    shared = tmp_path / "shared-ops"
+    shared.mkdir()
+    (shared / "up.sh").write_text("# the shared copy, not podpack's\n")
+    (shared / "prepare-host-dirs.sh").write_text("# also shared\n")
+    initialise(site)
+    shutil.rmtree(site / "scripts")
+    (site / "scripts").symlink_to(shared)
+    (upstream / "scripts" / "up.sh").write_text("# newer upstream\n")
+
+    for flags in ({}, {"take_upstream": {"scripts/up.sh"}}):
+        actions, state, conflicts = plan_upgrade(site, state_of(site), upstream, **flags)
+        substrate.apply(actions, site)
+        assert verbs(actions)["scripts/up.sh"] == "not managed here"
+
+    assert (shared / "up.sh").read_text() == "# the shared copy, not podpack's\n"
+    assert (shared / "prepare-host-dirs.sh").read_text() == "# also shared\n"
+
+
+def test_a_conflict_copy_cannot_be_planted_outside_the_site(
+    site: Path, upstream: Path, tmp_path: Path
+) -> None:
+    """`<file>.new` is a write like any other, and was the one without a guard."""
+    initialise(site)
+    outside = tmp_path / "notes.yaml"
+    outside.write_text("mine\n")
+    edited = site / "compose.yaml"
+    edited.write_text(edited.read_text() + "# mine\n")
+    (upstream / "compose.yaml").write_text("# upstream\n")
+    (site / "compose.yaml.new").symlink_to(outside)
+
+    actions, state, conflicts = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+
+    assert conflicts == 1
+    assert outside.read_text() == "mine\n"
+
+
+def test_init_does_not_chmod_through_a_link(site: Path, tmp_path: Path) -> None:
+    """The first command a site runs must not change a mode outside it."""
+    params = Parameters.build("my_site")
+    outside = tmp_path / "up.sh"
+    outside.write_bytes(render(substrate._entry_for("scripts/up.sh"), params, DATA_ROOT))
+    outside.chmod(0o644)
+    (site / "scripts").mkdir()
+    (site / "scripts" / "up.sh").symlink_to(outside)
+
+    initialise(site)
+
+    assert not os.access(outside, os.X_OK)
+
+
+def test_config_delivery_cannot_append_outside_the_site(
+    site: Path, upstream: Path, tmp_path: Path
+) -> None:
+    initialise(site)
+    outside = tmp_path / "env.example"
+    outside.write_text("SITE_NAME=mine\n")
+    (site / ".env.example").unlink()
+    (site / ".env.example").symlink_to(outside)
+    with (upstream / "env.example").open("a") as stream:
+        stream.write("\nNEW_KNOB=1\n")
+
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+
+    assert outside.read_text() == "SITE_NAME=mine\n"
 
 
 def test_a_deleted_managed_file_is_restored(site: Path) -> None:
@@ -522,6 +599,132 @@ def test_upgrade_exit_code_reports_conflicts(
 def test_commands_refuse_an_uninitialised_site(tmp_path: Path) -> None:
     for command in ("upgrade", "status", "diff"):
         assert main(["substrate", command, "--dir", str(tmp_path)]) == 2
+
+
+def test_contradictory_resolution_flags_are_a_usage_error(
+    site: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Branch order would decide it, and the loser is the site's own copy."""
+    initialise(site)
+    edited = site / "compose.yaml"
+    edited.write_text(edited.read_text() + "# mine\n")
+    assert main(["substrate", "upgrade", "--dir", str(site),
+                 "--take-upstream", "compose.yaml", "--keep", "compose.yaml"]) == 2
+    assert "both" in capsys.readouterr().out
+    assert edited.read_text().endswith("# mine\n")
+
+
+def test_take_upstream_keeps_the_discarded_version_beside_it(site: Path) -> None:
+    """"Nothing is ever clobbered" has to survive the one destructive flag."""
+    initialise(site)
+    edited = site / "compose.yaml"
+    edited.write_text(edited.read_text() + "# my production tweak\n")
+    mine = edited.read_text()
+
+    actions, state, _ = plan_upgrade(
+        site, state_of(site), DATA_ROOT, take_upstream={"compose.yaml"}
+    )
+    substrate.apply(actions, site)
+
+    assert not edited.read_text().endswith("# my production tweak\n")
+    assert (site / "compose.yaml.orig").read_text() == mine
+
+
+def test_a_hand_merged_conflict_copy_is_not_deleted(site: Path, upstream: Path) -> None:
+    """The conflict message invites merging into .new; deleting only what
+    podpack wrote keeps that work."""
+    initialise(site)
+    edited = site / "compose.yaml"
+    edited.write_text(edited.read_text() + "# mine\n")
+    (upstream / "compose.yaml").write_text("# upstream\n")
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+    state.save(site)
+    (site / "compose.yaml.new").write_text("MY CAREFUL HAND MERGE\n")
+
+    actions, state, _ = plan_upgrade(
+        site, state_of(site), upstream, take_upstream={"compose.yaml"}
+    )
+    substrate.apply(actions, site)
+
+    assert (site / "compose.yaml.new").read_text() == "MY CAREFUL HAND MERGE\n"
+
+
+def test_a_conflict_resolved_by_hand_clears_its_artifact(site: Path, upstream: Path) -> None:
+    """Copying the .new over is the obvious fix, and left it behind to rot."""
+    initialise(site)
+    edited = site / "compose.yaml"
+    edited.write_text(edited.read_text() + "# mine\n")
+    (upstream / "compose.yaml").write_text("# upstream\n")
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+    state.save(site)
+
+    shutil.copy(site / "compose.yaml.new", site / "compose.yaml")   # the hand fix
+    actions, state, conflicts = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+
+    assert conflicts == 0
+    assert not (site / "compose.yaml.new").exists()
+
+
+def test_an_unrecorded_parameter_is_not_re_derived(site: Path, upstream: Path) -> None:
+    """A state file that predates a parameter says nothing about it, and
+    inventing 8458 there writes a plausible wrong value into a live file."""
+    assert main(["substrate", "init", "--dir", str(site), "--yes",
+                 "--web-port", "9000"]) == 0
+    raw = json.loads((site / "substrate.json").read_text())
+    del raw["parameters"]["web_port"]                    # an older state file
+    (site / "substrate.json").write_text(json.dumps(raw))
+    with (upstream / "env.example").open("a") as stream:
+        stream.write("\nPROBE=http://localhost:@@WEB_HOST_PORT@@/x\n")
+
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+
+    assert "PROBE=http://localhost:CHANGEME/x" in (site / ".env.example").read_text()
+
+
+def test_a_damaged_state_file_exits_two_not_one(site: Path) -> None:
+    """Exit 1 means "conflicts to resolve"; a CI gate must tell them apart."""
+    initialise(site)
+    raw = json.loads((site / "substrate.json").read_text())
+    del raw["files"]
+    (site / "substrate.json").write_text(json.dumps(raw))
+    for command in ("upgrade", "status", "diff"):
+        assert main(["substrate", command, "--dir", str(site)]) == 2
+
+
+def test_status_does_not_invent_pending_work_for_a_trimmed_env(
+    site: Path, upstream: Path
+) -> None:
+    """status must seed a first-sighted .env exactly as upgrade does."""
+    initialise(site)
+    (site / ".env").write_text("SITE_NAME=my-site\n")   # trimmed, created after init
+
+    lines, pending = substrate.status(site, state_of(site), upstream)
+    actions, _, _ = plan_upgrade(site, state_of(site), upstream)
+
+    assert not pending
+    assert not any(a.verb == "appended new variables" for a in actions)
+
+
+def test_a_delivery_does_not_clear_an_unrelated_drift_report(
+    site: Path, upstream: Path
+) -> None:
+    initialise(site)
+    example = site / ".env.example"
+    example.write_text(example.read_text() + "MY_OWN=1\n")     # the site's edit
+    with (upstream / "env.example").open("a") as stream:
+        stream.write("\nNEW_KNOB=1\n")
+
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+    state.save(site)
+
+    lines, _ = substrate.status(site, state_of(site), upstream)
+    reported = next(line for line in lines if line.startswith(".env.example "))
+    assert "since edited" in reported
 
 
 def test_a_mistyped_resolution_path_is_refused_rather_than_ignored(

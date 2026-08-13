@@ -15,5 +15,8 @@ __pycache__/
 .pytest_cache/
 dist/
 
-# Conflict copies written by `podpack substrate upgrade` -- resolve and
-# remove them; committing one is a loud reminder, not an error.
+# Working copies written by `podpack substrate upgrade`: <file>.new holds
+# podpack's version of a conflict, <file>.orig the version --take-upstream
+# replaced. Deliberately NOT ignored -- committing one is a loud reminder
+# that something is unresolved, which is the point of writing it beside the
+# file rather than into it.
