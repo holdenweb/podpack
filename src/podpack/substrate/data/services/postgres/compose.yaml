@@ -1,0 +1,134 @@
+# PostgreSQL, as an overlay.
+#
+# Enabled by naming this file in COMPOSE_FILE:
+#
+#     COMPOSE_FILE=compose.yaml:compose.postgres.yaml
+#
+# It adds the server, its own storage-ownership one-shot, the on-request port
+# forwarder, and the two `depends_on` edges that make the rest of the stack
+# wait for it. Those edges live here rather than in the base for the reason
+# the base explains at length: a profile cannot carry them, an overlay can,
+# and a site without this file is then a site that simply has no SQL server
+# rather than a project compose refuses to build.
+
+services:
+  # Its own, not a mount added to the base's init-storage: compose REPLACES
+  # `command:` on merge, so adding one there would silently drop the app
+  # chown. PGDATA also insists on 0700, and a bind mount point's permissions
+  # belong to the host -- which is why the data directory is a sub-directory
+  # initdb creates itself (ADR-0020).
+  init-postgres:
+    image: docker.io/library/busybox:1.37
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        chown -R 999:999 /mnt/pg-data /mnt/pg-logs
+        echo "postgres storage ownership prepared"
+    volumes:
+      - ${HOST_DATA_DIR}/postgres:/mnt/pg-data
+      - ${HOST_LOG_DIR}/postgres:/mnt/pg-logs
+
+  postgres:
+    image: docker.io/library/postgres:17
+    restart: unless-stopped
+    env_file:
+      - .env
+      - secrets.env
+    environment:
+      # POSTGRES_USER/PASSWORD/DB arrive from secrets.env, which is where the
+      # image looks for them -- so no credential is interpolated here.
+      #
+      # A sub-directory of the mount, not the mount point itself. PostgreSQL
+      # refuses to start unless its data directory is mode 0700, and a bind
+      # mount point's permissions are decided by the host (on macOS virtiofs
+      # they come out 0777). A directory *inside* the mount is created by
+      # initdb, so it gets the mode PostgreSQL insists on.
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    # Take the server's settings from the host-mounted config rather than from
+    # the copy initdb writes into the data directory, so tuning the database on
+    # a real host is an edit-and-restart rather than a compose change.
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    volumes:
+      # Host storage. On SELinux hosts (RHEL/Fedora) append `,Z` to each of
+      # these; on macOS/Windows podman machine the label is unnecessary.
+      - ${HOST_DATA_DIR}/postgres:/var/lib/postgresql/data
+      - ${HOST_LOG_DIR}/postgres:/var/log/postgresql
+      # Host-specific configuration, read-only (append `,z` under SELinux).
+      # postgresql.conf points hba_file and ident_file at its two companions,
+      # so all three must be mounted together.
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./config/pg_ident.conf:/etc/postgresql/pg_ident.conf:ro
+      # First-run bootstrap; only runs while the data directory is empty.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      init-postgres:
+        condition: service_completed_successfully
+    # No `ports:` here on purpose -- see the `dbport` service below.
+    healthcheck:
+      # -U/-d matter: without them pg_isready reports the *server* is up before
+      # the bootstrap has finished creating the application's database.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # Reaching the database from the host, on request only.
+  #
+  # The server publishes no port. Nothing inside the suite needs one -- the
+  # app and the migration service reach `postgres:5432` across the compose
+  # network, and the healthcheck runs inside the container -- so a published
+  # port serves the host alone, and costs a number every other deployment on
+  # the machine must then agree not to reuse. SITE_NAME already isolates two
+  # sites completely; ports were the one thing still needing coordination,
+  # and a clash fails at container start with nothing said beforehand.
+  #
+  # So it is opt-in, and the number is yours at the moment you ask:
+  #
+  #     podman compose --profile postgres-port up -d postgres-port
+  #     POSTGRES_HOST_PORT=5439 podman compose --profile postgres-port up -d postgres-port
+  #
+  # A shell variable beats the one in .env, so the second form needs no edit
+  # and no restart of anything else. That is what `alembic revision
+  # --autogenerate` wants, since it compares the models against a live
+  # database (ADR-0011); `podman compose exec postgres psql` needs no port at
+  # all. Take it down again with
+  # `podman compose --profile postgres-port rm -sf postgres-port`.
+  postgres-port:
+    profiles: ["postgres-port"]
+    image: docker.io/alpine/socat:1.8.0.3
+    command: tcp-listen:5432,fork,reuseaddr tcp-connect:postgres:5432
+    restart: "no"
+    ports:
+      # Loopback unless the host says otherwise, exactly as the web service.
+      - "${POSTGRES_BIND_ADDR:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+
+  # The two edges that make the rest of the stack wait for this server. They
+  # merge into what the base declared rather than replacing it, which is the
+  # whole mechanism: `migrate` gains a gate it does not have without SQL, and
+  # `web` inherits it through migrate.
+  migrate:
+    environment:
+      PODPACK_SERVICE_POSTGRES: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    environment:
+      PODPACK_SERVICE_POSTGRES: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy

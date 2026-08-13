@@ -66,6 +66,10 @@ def _build_parser() -> argparse.ArgumentParser:
     init.add_argument("--db-name", default=None, help="database name (default: site package)")
     init.add_argument("--db-user", default=None, help="application role (default: <site package>_app)")
     init.add_argument("--db-password", default=None, help="lab password for the application role")
+    init.add_argument("--services", default=None,
+                      help="comma-separated backing services this site runs "
+                           f"(default: {','.join(substrate.services.DEFAULT_SERVICES)}; "
+                           f"available: {','.join(substrate.services.names())})")
     init.add_argument("--dry-run", action="store_true", help="report without writing")
     init.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
 
@@ -142,9 +146,20 @@ def _init(args: argparse.Namespace) -> int:
               "./pyproject.toml); say it explicitly with --site-package")
         return 2
 
+    declared = (
+        tuple(part.strip() for part in args.services.split(",") if part.strip())
+        if args.services else None
+    )
+    if declared:
+        unknown_services = substrate.services.unknown(declared)
+        if unknown_services:
+            print("no such core service: " + ", ".join(unknown_services))
+            print("available: " + ", ".join(substrate.services.names()))
+            return 2
     params = Parameters.build(
         site_package,
         site_name=args.site_name,
+        site_services=declared,
         web_port=args.web_port,
         db_port=args.db_port,
         db_name=args.db_name,
@@ -154,6 +169,8 @@ def _init(args: argparse.Namespace) -> int:
     print(f"site package: {params.site_package}   site name: {params.site_name}")
     print(f"ports: web {params.web_port}, postgres {params.db_port}   "
           f"database: {params.db_name} as {params.db_user}")
+    print(f"services: {', '.join(params.site_services)}   "
+          f"COMPOSE_FILE={substrate.services.compose_file_line(params.site_services)}")
     if not args.yes and not args.dry_run and sys.stdin.isatty():
         answer = input("Proceed? [Y/n] ").strip().lower()
         if answer not in ("", "y", "yes"):

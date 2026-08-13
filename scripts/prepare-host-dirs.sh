@@ -31,11 +31,23 @@ set -a; . ./.env; set +a
 # at startup, named after whatever is installed. That is the point of mounting
 # the roots: installing an app must never require a change here or to
 # compose.yaml.
-for dir in \
-    "${HOST_DATA_DIR}/postgres" \
-    "${HOST_DATA_DIR}/apps" \
-    "${HOST_LOG_DIR}/postgres" \
-    "${HOST_LOG_DIR}/apps"
+dirs=("${HOST_DATA_DIR}/apps" "${HOST_LOG_DIR}/apps")
+
+# Per-service directories, derived from the overlays COMPOSE_FILE names -- so
+# enabling a service in .env is the whole of enabling it, with no second list
+# here to fall out of step. A service podpack does not know about is simply
+# not matched, which is the same silence compose gives it.
+case "${COMPOSE_FILE:-}" in
+    *compose.postgres.yaml*)
+        dirs+=("${HOST_DATA_DIR}/postgres" "${HOST_LOG_DIR}/postgres") ;;
+esac
+case "${COMPOSE_FILE:-}" in
+    *compose.mongodb.yaml*)
+        dirs+=("${HOST_DATA_DIR}/mongodb/data" "${HOST_DATA_DIR}/mongodb/configdb"
+               "${HOST_LOG_DIR}/mongodb") ;;
+esac
+
+for dir in "${dirs[@]}"
 do
     mkdir -p "$dir"
     echo "ready: $dir"
@@ -49,7 +61,12 @@ done
 # virtiofs mount already presents everything as writable, and the compose
 # init-storage service handles it in either case.
 if [[ "$(uname -s)" == "Linux" ]]; then
-    podman unshare chown -R 999:999 "${HOST_DATA_DIR}/postgres" "${HOST_LOG_DIR}/postgres"
     podman unshare chown -R 10001:10001 "${HOST_DATA_DIR}/apps" "${HOST_LOG_DIR}/apps"
+    for dir in "${dirs[@]}"; do
+        case "$dir" in
+            *"/apps") ;;
+            *) podman unshare chown -R 999:999 "$dir" ;;
+        esac
+    done
     echo "ownership set for the containers' unprivileged uids"
 fi

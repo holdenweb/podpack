@@ -1,18 +1,22 @@
 {
   "delivered_vars": {
     ".env": [
+      "COMPOSE_FILE",
       "GUNICORN_WORKERS",
       "HOST_DATA_DIR",
       "HOST_LOG_DIR",
+      "POSTGRES_BIND_ADDR",
       "POSTGRES_HOST_PORT",
       "SITE_NAME",
       "WEB_BIND_ADDR",
       "WEB_HOST_PORT"
     ],
     ".env.example": [
+      "COMPOSE_FILE",
       "GUNICORN_WORKERS",
       "HOST_DATA_DIR",
       "HOST_LOG_DIR",
+      "POSTGRES_BIND_ADDR",
       "POSTGRES_HOST_PORT",
       "SITE_NAME",
       "WEB_BIND_ADDR",
@@ -36,7 +40,7 @@
     ".env.example": {
       "class": "config",
       "seeded_by": "pre-existing",
-      "sha256": "fe63bcd8c77a7329ba236fc976ec2703d3068b3391560ccbbd192ce38e8b8749"
+      "sha256": "284b334049d2012cf5f8034e3c5af84c03a826b2a86f7d310a42585b15ab407e"
     },
     ".gitignore": {
       "class": "seeded",
@@ -69,9 +73,21 @@
       "seeded_by": "0.3.0",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
+    "compose.mongodb.yaml": {
+      "class": "verbatim",
+      "sha256": "3414a1104d414f23d3275ba064d5ddd13391a5e28a81b5289715a61db9f76771"
+    },
+    "compose.postgres.yaml": {
+      "class": "verbatim",
+      "sha256": "301c378eccd0003b60e29b80d14628df07ea31c0a7b913517974c8155d440391"
+    },
     "compose.yaml": {
       "class": "verbatim",
-      "sha256": "aabc220468d99983341b083637a2d9925b22b71374a6de26438bea23b77c0dfe"
+      "sha256": "2f779cbb9df609d3725ef4efa3750ac5500e31f9357dc9b310bcbb6dec56d54f"
+    },
+    "config/mongod.conf": {
+      "class": "verbatim",
+      "sha256": "c2a304c05a43107c863c4628a60b09eaefed5bafea193040dde3a6cfebc9ff95"
     },
     "config/pg_hba.conf": {
       "class": "verbatim",
@@ -93,9 +109,13 @@
       "class": "verbatim",
       "sha256": "44202d372549fd421a3e141ed7d75c7d55175e7252cc7da935bc5e3af803bdf1"
     },
+    "mongodb-init/01-create-app-user.sh": {
+      "class": "verbatim",
+      "sha256": "a77c518c03c7741773eb2f7edefb62aa1570459dcb3a3f52f687c7485ff666cc"
+    },
     "scripts/prepare-host-dirs.sh": {
       "class": "verbatim",
-      "sha256": "c5a8451ec9c9bc18dc0c71de182642af93790aa8866aef3a4ec0072936a29095"
+      "sha256": "d39f88f28560a9538e7ca159a4995c2a39480c50f7eb676c71655bd417b33b86"
     },
     "scripts/up.sh": {
       "class": "verbatim",

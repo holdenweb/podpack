@@ -34,6 +34,8 @@ from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
+from podpack import services
+
 STATE_FILE = "substrate.json"
 STATE_SCHEMA = 1
 
@@ -44,6 +46,12 @@ VERBATIM = "verbatim"    # managed, byte-identical
 RENDERED = "rendered"    # managed, site parameters substituted
 CONFIG = "config"        # seeded, then append-only parameter delivery
 SEEDED = "seeded"        # written once if absent, never touched again
+FRAGMENT = "fragment"    # joins a CONFIG file's canon when its service is on
+
+# A FRAGMENT has no target of its own: its `target` names the CONFIG file it
+# extends. That is what keeps a postgres-only site from ever being told to
+# add six MONGODB_ secrets -- and what makes a site that later enables
+# mongodb receive exactly those, by the ordinary append rule.
 
 _TOKEN_RE = re.compile(r"@@[A-Z_]+@@")
 _VAR_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=")
@@ -64,17 +72,11 @@ class SubstrateFile:
     executable: bool = False
 
 
-MANIFEST: tuple[SubstrateFile, ...] = (
+BASE_MANIFEST: tuple[SubstrateFile, ...] = (
     SubstrateFile("Containerfile", "Containerfile", RENDERED),
     SubstrateFile("compose.yaml", "compose.yaml", VERBATIM),
     SubstrateFile("dockerignore", ".dockerignore", VERBATIM),
     SubstrateFile("container/healthcheck.py", "container/healthcheck.py", VERBATIM),
-    SubstrateFile(
-        "db-init/01-create-app-user.sh",
-        "db-init/01-create-app-user.sh",
-        VERBATIM,
-        executable=True,
-    ),
     SubstrateFile("scripts/up.sh", "scripts/up.sh", VERBATIM, executable=True),
     SubstrateFile(
         "scripts/prepare-host-dirs.sh",
@@ -82,9 +84,9 @@ MANIFEST: tuple[SubstrateFile, ...] = (
         VERBATIM,
         executable=True,
     ),
-    SubstrateFile("config/postgresql.conf", "config/postgresql.conf", VERBATIM),
-    SubstrateFile("config/pg_hba.conf", "config/pg_hba.conf", VERBATIM),
-    SubstrateFile("config/pg_ident.conf", "config/pg_ident.conf", VERBATIM),
+    # The alembic environment is base, not postgres's: `db` and its one
+    # history are core to podpack, and ADR-0015 wants moving to a managed
+    # PostgreSQL to be a change to one variable and nothing else.
     SubstrateFile("alembic/env.py", "alembic/env.py", VERBATIM),
     SubstrateFile("alembic/script.py.mako", "alembic/script.py.mako", VERBATIM),
     SubstrateFile("alembic.ini", "alembic.ini", VERBATIM),
@@ -94,6 +96,68 @@ MANIFEST: tuple[SubstrateFile, ...] = (
     SubstrateFile("README.stub.md", "README.md", SEEDED),
     SubstrateFile("alembic/versions/gitkeep", "alembic/versions/.gitkeep", SEEDED),
 )
+
+SERVICE_FILES: dict[str, tuple[SubstrateFile, ...]] = {
+    # The files each catalogued service brings. Kept here rather than on the
+    # descriptor so that `podpack.services` needs to know nothing about the
+    # substrate -- the import runs one way. A test pins these keys against
+    # the catalogue, so a service cannot be added without them.
+    #
+    # Note that postgres's targets are exactly where they have always been.
+    # Only the manifest *row* moves, and records are keyed by target, so no
+    # site sees a file appear or disappear.
+    "postgres": (
+        SubstrateFile("services/postgres/compose.yaml", "compose.postgres.yaml", VERBATIM),
+        SubstrateFile("config/postgresql.conf", "config/postgresql.conf", VERBATIM),
+        SubstrateFile("config/pg_hba.conf", "config/pg_hba.conf", VERBATIM),
+        SubstrateFile("config/pg_ident.conf", "config/pg_ident.conf", VERBATIM),
+        SubstrateFile(
+            "db-init/01-create-app-user.sh",
+            "db-init/01-create-app-user.sh",
+            VERBATIM,
+            executable=True,
+        ),
+        SubstrateFile("services/postgres/env.fragment", ".env.example", FRAGMENT),
+        SubstrateFile("services/postgres/secrets.fragment", "secrets.env.example", FRAGMENT),
+    ),
+    "mongodb": (
+        SubstrateFile("services/mongodb/compose.yaml", "compose.mongodb.yaml", VERBATIM),
+        SubstrateFile("services/mongodb/mongod.conf", "config/mongod.conf", VERBATIM),
+        SubstrateFile(
+            "services/mongodb/01-create-app-user.sh",
+            "mongodb-init/01-create-app-user.sh",
+            VERBATIM,
+            executable=True,
+        ),
+        SubstrateFile("services/mongodb/env.fragment", ".env.example", FRAGMENT),
+        SubstrateFile("services/mongodb/secrets.fragment", "secrets.env.example", FRAGMENT),
+    ),
+}
+
+
+def _service_files() -> tuple[SubstrateFile, ...]:
+    """Every service's real files, in catalogue order.
+
+    Fragments are excluded: they have no target of their own, extending a
+    CONFIG file's canon instead.
+    """
+    return tuple(
+        entry
+        for name in services.CATALOGUE
+        for entry in SERVICE_FILES.get(name, ())
+        if entry.kind != FRAGMENT
+    )
+
+
+MANIFEST: tuple[SubstrateFile, ...] = BASE_MANIFEST + _service_files()
+"""Every managed file, whatever this site runs.
+
+A service's files are installed even when the site does not enable it --
+they are inert text, compose never opens an overlay COMPOSE_FILE does not
+name -- because the alternative costs more than the kilobytes. This way
+`MANIFEST` stays a constant that needs no site state, `status` stays total,
+and the byte-identical dogfood pin covers every service's files for free.
+"""
 
 MANAGED_KINDS = (VERBATIM, RENDERED)
 
@@ -121,8 +185,10 @@ class Parameters:
     db_name: str = ""
     db_user: str = ""
     db_password: str = ""
+    site_services: tuple[str, ...] = services.DEFAULT_SERVICES
 
-    RECORDED = ("site_package", "site_name", "web_port", "db_port", "db_name", "db_user")
+    RECORDED = ("site_package", "site_name", "web_port", "db_port", "db_name",
+                "db_user", "site_services")
 
     DEFAULT_WEB_PORT = 8458
     DEFAULT_DB_PORT = 5433
@@ -161,11 +227,23 @@ class Parameters:
         for key in ("web_port", "db_port"):
             if key in values:
                 values[key] = int(values[key])
+        # The one deliberate exception to "unrecorded stays unset". Absence
+        # tells us nothing about a port or a password, so those keep their
+        # tokens and delivery marks them CHANGEME. Absence of `site_services`
+        # tells us something exact: this state was written before services
+        # were a choice, which describes a site whose compose.yaml had
+        # postgres welded in. Delivering COMPOSE_FILE=CHANGEME to such a site
+        # is the failure this line exists to prevent.
+        values["site_services"] = tuple(
+            part for part in values.get("site_services", "postgres").split(",") if part
+        )
         return Parameters(site_package=site_package, site_name=values.pop("site_name", ""),
                           **values)
 
     def recorded(self) -> dict[str, str]:
-        return {key: str(getattr(self, key)) for key in self.RECORDED}
+        values = {key: str(getattr(self, key)) for key in self.RECORDED}
+        values["site_services"] = ",".join(self.site_services)
+        return values
 
     def tokens(self) -> dict[str, str]:
         """Substitutions for this site, omitting anything unresolved.
@@ -182,7 +260,15 @@ class Parameters:
             "@@DB_NAME@@": self.db_name,
             "@@DB_USER@@": self.db_user,
             "@@DB_PASSWORD@@": self.db_password,
+            "@@COMPOSE_FILE@@": services.compose_file_line(self.site_services),
         }
+        # Every service's forwarder default, derived rather than listed, so a
+        # new catalogue entry needs no change here. postgres's is the one the
+        # site may have chosen at init, and it keeps its own recorded value.
+        for name, service in services.CATALOGUE.items():
+            candidates.setdefault(
+                f"@@{name.upper()}_HOST_PORT@@", str(service.default_host_port)
+            )
         return {token: value for token, value in candidates.items() if value}
 
 
@@ -308,6 +394,25 @@ def render(entry: SubstrateFile, params: Parameters, root: Traversable | Path) -
     return text.encode("utf-8")
 
 
+def config_canon(target: str, params: Parameters, root: Traversable | Path) -> bytes:
+    """A CONFIG file's canonical content for *this* site.
+
+    The base file, plus the fragment of every service the site declares. It
+    is what makes per-service variables and secrets work in both directions:
+    a postgres-only site is never told to add MONGODB_ secrets, and a site
+    that later declares mongodb receives exactly those by the ordinary
+    append rule, with no special case anywhere in the delivery code.
+    """
+    text = render(_entry_for(target), params, root)
+    for name in services.CATALOGUE:
+        if name not in params.site_services:
+            continue
+        for entry in SERVICE_FILES.get(name, ()):
+            if entry.kind == FRAGMENT and entry.target == target:
+                text += b"\n" + render(entry, params, root)
+    return text
+
+
 def unrendered_tokens(data: bytes) -> list[str]:
     """Tokens that survived a render -- always a bug or a missing parameter."""
     return sorted(set(_TOKEN_RE.findall(data.decode("utf-8", errors="replace"))))
@@ -362,7 +467,14 @@ def plan_init(site_dir: Path, params: Parameters, root: Traversable | Path) -> t
 
     for entry in MANIFEST:
         target = site_dir / entry.target
-        rendered = render(entry, params, root)
+        # A CONFIG file is seeded as the *canon*: the base plus the fragment
+        # of every service this site declared. Seeding the base alone would
+        # write a secrets.env.example with no database block in it.
+        rendered = (
+            config_canon(entry.target, params, root)
+            if entry.kind == CONFIG
+            else render(entry, params, root)
+        )
         record: dict[str, Any] = {"class": entry.kind, "sha256": sha256(rendered)}
 
         # Before anything reads or writes: a path that resolves outside the
@@ -408,7 +520,12 @@ def plan_init(site_dir: Path, params: Parameters, root: Traversable | Path) -> t
                 record["sha256"] = sha256(target.read_bytes())
                 record["seeded_by"] = "pre-existing"
             if entry.kind == CONFIG:
-                canon_names = env_var_names(rendered.decode("utf-8"))
+                # The canon, not the base file: a service's fragment is part
+                # of what this site has been offered, or its variables would
+                # be delivered all over again on the next upgrade.
+                canon_names = env_var_names(
+                    config_canon(entry.target, params, root).decode("utf-8")
+                )
                 delivered = set(canon_names)
                 if target.exists():
                     # Anything the site already defines counts as delivered:
@@ -437,7 +554,7 @@ def plan_init(site_dir: Path, params: Parameters, root: Traversable | Path) -> t
     # at whatever it and the canonical example define today.
     live_env = site_dir / ".env"
     if live_env.is_file():
-        example = render(_entry_for(".env.example"), params, root).decode("utf-8")
+        example = config_canon(".env.example", params, root).decode("utf-8")
         delivered = set(env_var_names(example)) | set(env_var_names(live_env.read_text()))
         state.delivered_vars[".env"] = sorted(delivered)
         actions.append(Action(".env", "tracked", detail="append-only variable delivery"))
@@ -596,8 +713,10 @@ def plan_upgrade(
             state.files[entry.target] = record
 
         elif entry.kind == CONFIG:
-            actions.extend(_plan_var_delivery(site_dir, state, entry.target,
-                                              rendered.decode("utf-8"), new_version))
+            actions.extend(_plan_var_delivery(
+                site_dir, state, entry.target,
+                config_canon(entry.target, params, root).decode("utf-8"),
+                new_version))
 
         else:  # SEEDED: never touched again, not even recreated.
             if not target.exists():
@@ -611,7 +730,7 @@ def plan_upgrade(
     # guide never received a new variable, silently and for ever.
     live_env = site_dir / ".env"
     if live_env.is_file():
-        example = render(_entry_for(".env.example"), params, root).decode("utf-8")
+        example = config_canon(".env.example", params, root).decode("utf-8")
         if ".env" not in state.delivered_vars:
             # What the file already defines, plus what its example had been
             # offered before today: adopting must neither dump the whole
@@ -626,7 +745,7 @@ def plan_upgrade(
     # is a weak credential on its way to production. Report instead.
     secrets = site_dir / "secrets.env"
     if secrets.is_file():
-        canon = render(_entry_for("secrets.env.example"), params, root).decode("utf-8")
+        canon = config_canon("secrets.env.example", params, root).decode("utf-8")
         missing = _missing_secrets(secrets.read_text(), canon)
         if missing:
             actions.append(Action(
@@ -831,7 +950,9 @@ def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list
                 word, pending = "conflict", True
         elif entry.kind == CONFIG:
             undelivered = [
-                n for n in env_var_names(rendered.decode("utf-8"))
+                n for n in env_var_names(
+                    config_canon(entry.target, params, root).decode("utf-8")
+                )
                 if n not in set(state.delivered_vars.get(entry.target, []))
             ]
             if disk_hash is None:
@@ -856,7 +977,7 @@ def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list
     # would hide the one thing an upgrade will do to it.
     live_env = site_dir / ".env"
     if live_env.is_file() and not escapes(site_dir, live_env):
-        example = render(_entry_for(".env.example"), params, root).decode("utf-8")
+        example = config_canon(".env.example", params, root).decode("utf-8")
         # The same seeding upgrade applies on first sighting, or status would
         # report every variable the site trimmed from .env as pending work
         # that an upgrade then declines to do.
@@ -878,7 +999,7 @@ def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list
     # have told the site it was missing a required secret.
     secrets = site_dir / "secrets.env"
     if secrets.is_file():
-        canon = render(_entry_for("secrets.env.example"), params, root).decode("utf-8")
+        canon = config_canon("secrets.env.example", params, root).decode("utf-8")
         missing = _missing_secrets(secrets.read_text(), canon)
         if missing:
             pending = True

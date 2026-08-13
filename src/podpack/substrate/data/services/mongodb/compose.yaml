@@ -1,0 +1,106 @@
+# MongoDB, as an overlay.
+#
+# Enabled by naming this file in COMPOSE_FILE:
+#
+#     COMPOSE_FILE=compose.yaml:compose.mongodb.yaml
+#
+# A site may run it beside PostgreSQL, or instead of it. podpack's own `db`
+# and its one alembic history are SQL, so a site with no postgres has no
+# `db` -- see ADR-0028 on what that costs and which half of podpack still
+# works.
+
+services:
+  # Its own storage one-shot, like every service's: compose REPLACES
+  # `command:` when merging files, so a mount added to the base's
+  # init-storage would silently drop the app chown.
+  init-mongodb:
+    image: docker.io/library/busybox:1.37
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        chown -R 999:999 /mnt/mongo-data /mnt/mongo-configdb /mnt/mongo-logs
+        echo "mongodb storage ownership prepared"
+    volumes:
+      - ${HOST_DATA_DIR}/mongodb/data:/mnt/mongo-data
+      - ${HOST_DATA_DIR}/mongodb/configdb:/mnt/mongo-configdb
+      - ${HOST_LOG_DIR}/mongodb:/mnt/mongo-logs
+
+  mongodb:
+    image: docker.io/library/mongo:7
+    restart: unless-stopped
+    env_file:
+      - .env
+      - secrets.env
+    # MONGO_INITDB_ROOT_USERNAME/PASSWORD are the names the image itself
+    # reads, and they arrive through secrets.env like every other credential
+    # -- nothing here interpolates one, so this file stays safe to commit
+    # and to read (ADR-0013).
+    command:
+      - mongod
+      - --config
+      - /etc/mongo/mongod.conf
+    volumes:
+      # Host storage. On SELinux hosts append `,Z` to these and `,z` to the
+      # read-only mount; see README, "Running on Linux".
+      - ${HOST_DATA_DIR}/mongodb/data:/data/db
+      - ${HOST_DATA_DIR}/mongodb/configdb:/data/configdb
+      - ${HOST_LOG_DIR}/mongodb:/var/log/mongodb
+      - ./config/mongod.conf:/etc/mongo/mongod.conf:ro
+      # First-run bootstrap; runs only while the data directory is empty.
+      - ./mongodb-init:/docker-entrypoint-initdb.d:ro
+    depends_on:
+      init-mongodb:
+        condition: service_completed_successfully
+    healthcheck:
+      # Authenticated deliberately: an unauthenticated ping answers while the
+      # bootstrap is still creating the application user, which is the same
+      # trap `pg_isready` without -U/-d falls into.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --host 127.0.0.1
+          --username "$${MONGO_INITDB_ROOT_USERNAME}"
+          --password "$${MONGO_INITDB_ROOT_PASSWORD}"
+          --authenticationDatabase admin
+          --eval "db.adminCommand('ping').ok" | grep -q 1
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # The host port, on request only -- the same arrangement every service has
+  # (ADR-0027):
+  #
+  #     podman compose --profile mongodb-port up -d mongodb-port
+  #     MONGODB_HOST_PORT=27020 podman compose --profile mongodb-port up -d mongodb-port
+  #
+  # A shell variable beats .env, so a number can be chosen for one use.
+  mongodb-port:
+    profiles: ["mongodb-port"]
+    image: docker.io/alpine/socat:1.8.0.3
+    command: tcp-listen:27017,fork,reuseaddr tcp-connect:mongodb:27017
+    restart: "no"
+    ports:
+      - "${MONGODB_BIND_ADDR:-127.0.0.1}:${MONGODB_HOST_PORT:-27019}:27017"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  # The edges that make the rest of the stack wait for the server, merged
+  # into what the base declared rather than replacing it.
+  migrate:
+    environment:
+      PODPACK_SERVICE_MONGODB: "1"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  web:
+    environment:
+      PODPACK_SERVICE_MONGODB: "1"
+    depends_on:
+      mongodb:
+        condition: service_healthy
