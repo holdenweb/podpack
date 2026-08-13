@@ -471,8 +471,13 @@ COMPOSE_FILE=compose.yaml:compose.postgres.yaml
 
 | Service | What it is |
 | --- | --- |
-| `postgres` | PostgreSQL, and the SQL database podpack's own `db` and alembic use |
-| `mongodb` | MongoDB, for apps that store documents rather than rows |
+| `postgres` | **Required.** The SQL database `db`, the alembic history and the site's login tables all live in it, and `create_app` refuses to start without a `SQLALCHEMY_DATABASE_URI`. |
+| `mongodb` | Optional. For apps that store documents rather than rows. |
+
+What is optional about PostgreSQL is the *container*, not the database: a
+site may drop `compose.postgres.yaml` from `COMPOSE_FILE` by hand and point
+the URI at a managed instance, which is the Opalstack arrangement
+[ADR-0015](adrs/0015-postgresql-stays-in-a-container.md) anticipated.
 
 ```bash
 uv run podpack substrate services                 # what this site runs

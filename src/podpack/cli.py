@@ -68,9 +68,9 @@ def _build_parser() -> argparse.ArgumentParser:
     init.add_argument("--db-user", default=None, help="application role (default: <site package>_app)")
     init.add_argument("--db-password", default=None, help="lab password for the application role")
     init.add_argument("--services", default=None,
-                      help="comma-separated backing services this site runs "
-                           f"(default: {','.join(substrate.services.DEFAULT_SERVICES)}; "
-                           f"available: {','.join(substrate.services.names())})")
+                      help="comma-separated OPTIONAL services this site also runs "
+                           f"(available: {','.join(substrate.services.optional_names())}). "
+                           f"Always included: {','.join(substrate.services.required())}")
     init.add_argument("--dry-run", action="store_true", help="report without writing")
     init.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
 
@@ -103,7 +103,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     svc.add_argument("--dir", default=".")
     svc.add_argument("--add", metavar="NAME", action="append", default=[],
-                     help="enable a catalogued service for this site")
+                     help="enable an optional service for this site "
+                          f"({','.join(substrate.services.optional_names())})")
     svc.add_argument("--dry-run", action="store_true", help="report without writing")
 
     diff = actions.add_parser("diff", help="diff substrate files against the installed version")
@@ -297,7 +298,12 @@ def _services(args: argparse.Namespace) -> int:
     if not args.add:
         print(f"COMPOSE_FILE  {substrate.services.compose_file_line(enabled)}")
         for name, service in catalogue.items():
-            mark = "enabled  " if name in enabled else "available"
+            if not service.optional:
+                mark = "required "
+            elif name in enabled:
+                mark = "enabled  "
+            else:
+                mark = "available"
             print(f"  {name:10} {mark}  {service.summary}")
         return 0
 
@@ -307,6 +313,12 @@ def _services(args: argparse.Namespace) -> int:
         print("available: " + ", ".join(substrate.services.names()))
         return 2
 
+    mandatory = [n for n in args.add if not catalogue[n].optional]
+    if mandatory:
+        print(f"{', '.join(mandatory)} is required and always enabled -- "
+              "podpack needs SQL for `db`, its migration history and the "
+              "site's own login tables.")
+        return 0
     added = [name for name in args.add if name not in enabled]
     if not added:
         print(f"already enabled: {', '.join(args.add)}")

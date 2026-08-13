@@ -1,6 +1,6 @@
 # ADR-0028: Core services are compose overlays the site chooses
 
-**Status:** Accepted
+**Status:** Accepted — amended by [ADR-0029](0029-postgresql-is-required-mongodb-is-optional.md), which makes PostgreSQL required rather than chosen
 
 **Date:** 2026-08-13
 

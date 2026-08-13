@@ -153,8 +153,8 @@ files a site copies rather than imports, which also include everything Part 2
 deploys with. One command lays the whole set down:
 
 ```bash
-uv run podpack substrate init                       # postgres, the default
-uv run podpack substrate init --services mongodb    # or say what this site runs
+uv run podpack substrate init                       # postgres alone
+uv run podpack substrate init --services mongodb    # postgres and mongodb
 ```
 
 It derives the site's package from `pyproject.toml`, says what it resolved,
@@ -162,9 +162,12 @@ and writes the alembic environment, the container files, and starter
 `.env.example` / `secrets.env.example` / `.gitignore` files — recording what
 it installed in `substrate.json`, which you commit.
 
-`--services` is the site owner's decision and nobody else's: an app cannot
-declare that it needs a store, and the default is `postgres` because every
-site so far has wanted one. It is not a decision you are stuck with —
+`--services` names the *optional* stores this site also runs. PostgreSQL is
+not among them: `db`, the migration history and the site's login tables are
+all SQL, so podpack will not start without it
+([ADR-0029](adrs/0029-postgresql-is-required-mongodb-is-optional.md)).
+Which optional stores to run is the site owner's decision and nobody else's
+— an app cannot declare that it needs one. It is not a decision you are stuck with —
 `podpack substrate services --add mongodb` enables another later, and
 `podpack substrate services` says what a site runs today.
 

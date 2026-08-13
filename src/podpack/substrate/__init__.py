@@ -206,6 +206,7 @@ class Parameters:
             "db_password": f"{dashed}-app-password",  # a lab value, like the seeds'
         }
         values.update({k: v for k, v in overrides.items() if v is not None})
+        values["site_services"] = services.normalise(values.get("site_services", ()))
         return Parameters(site_package=site_package, **values)
 
     @staticmethod
@@ -234,8 +235,10 @@ class Parameters:
         # were a choice, which describes a site whose compose.yaml had
         # postgres welded in. Delivering COMPOSE_FILE=CHANGEME to such a site
         # is the failure this line exists to prevent.
-        values["site_services"] = tuple(
-            part for part in values.get("site_services", "postgres").split(",") if part
+        # normalise, so a state file that predates a service becoming
+        # mandatory still describes a site that runs it.
+        values["site_services"] = services.normalise(
+            [part for part in values.get("site_services", "").split(",") if part]
         )
         return Parameters(site_package=site_package, site_name=values.pop("site_name", ""),
                           **values)

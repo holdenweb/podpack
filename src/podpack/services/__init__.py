@@ -48,6 +48,19 @@ class CoreService:
     handed to before it starts -- see ADR-0020, the most expensive lesson in
     the project."""
 
+    optional: bool = True
+    """Whether a site may choose not to run it.
+
+    PostgreSQL is not. podpack requires `SQLALCHEMY_DATABASE_URI` before it
+    will build an application at all, `db` and its single alembic history are
+    core, and the site's own login tables live there -- so a site without SQL
+    is not a smaller podpack site, it is one that cannot start.
+
+    What remains optional is the *container*: dropping this overlay from
+    COMPOSE_FILE by hand and pointing the URI at a managed PostgreSQL is
+    supported, and is the escape hatch ADR-0015 asked for. podpack will not
+    do it for you, exactly as it removes no other service."""
+
     summary: str = ""
     driver: str = ""
     """The Python module a site needs installed to talk to this service.
@@ -114,6 +127,7 @@ POSTGRES = CoreService(
     image="docker.io/library/postgres:17",
     internal_port=5432,
     default_host_port=5433,
+    optional=False,
     summary="PostgreSQL, and the SQL database podpack's own `db` and alembic use",
     # No driver: psycopg2-binary is one of podpack's own dependencies, because
     # `db` is core rather than optional. See ADR-0028 on why SQL is the one
@@ -147,11 +161,29 @@ CATALOGUE: dict[str, CoreService] = {
     service.name: service for service in (POSTGRES, MONGODB)
 }
 
-DEFAULT_SERVICES: tuple[str, ...] = ("postgres",)
-"""What a site that predates this catalogue is running, and what `init`
-proposes. Not a claim that postgres is special -- only that every site so
-far has one, and that a default nobody has to think about is worth more than
-a symmetry nobody benefits from."""
+def required() -> tuple[str, ...]:
+    """The services every site runs, whatever it declares."""
+    return tuple(name for name, service in CATALOGUE.items() if not service.optional)
+
+
+def optional_names() -> tuple[str, ...]:
+    """The services a site may choose to run."""
+    return tuple(name for name, service in CATALOGUE.items() if service.optional)
+
+
+DEFAULT_SERVICES: tuple[str, ...] = required()
+"""What a new site runs before it asks for anything: the mandatory set."""
+
+
+def normalise(declared: Sequence[str]) -> tuple[str, ...]:
+    """The services a site actually runs, in catalogue order.
+
+    Mandatory services are included whether or not they were declared: a
+    site's list records what it *chose*, and choosing is only meaningful
+    where there is a choice.
+    """
+    wanted = set(declared) | set(required())
+    return tuple(name for name in CATALOGUE if name in wanted)
 
 
 def names() -> tuple[str, ...]:
@@ -174,7 +206,7 @@ def compose_file_line(declared: Sequence[str]) -> str:
     sites running the same services produce the same line and a diff between
     them means something.
     """
-    overlays = [CATALOGUE[name].overlay for name in CATALOGUE if name in declared]
+    overlays = [CATALOGUE[name].overlay for name in normalise(declared)]
     return ":".join([BASE_COMPOSE, *overlays])
 
 
