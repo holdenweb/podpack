@@ -92,10 +92,7 @@ services:
     depends_on:
       init-storage:
         condition: service_completed_successfully
-    ports:
-      # Bound to loopback so the lab database is reachable from psql on the
-      # host, but never from the network.
-      - "127.0.0.1:${POSTGRES_HOST_PORT}:5432"
+    # No `ports:` here on purpose -- see the `dbport` service below.
     healthcheck:
       # -U/-d matter: without them pg_isready reports the *server* is up before
       # the bootstrap has finished creating the application's database.
@@ -104,6 +101,39 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+  # Reaching the database from the host, on request only.
+  #
+  # The server publishes no port. Nothing inside the suite needs one -- the
+  # app and the migration service reach `postgres:5432` across the compose
+  # network, and the healthcheck runs inside the container -- so a published
+  # port serves the host alone, and costs a number every other deployment on
+  # the machine must then agree not to reuse. SITE_NAME already isolates two
+  # sites completely; ports were the one thing still needing coordination,
+  # and a clash fails at container start with nothing said beforehand.
+  #
+  # So it is opt-in, and the number is yours at the moment you ask:
+  #
+  #     podman compose --profile dbport up -d dbport
+  #     POSTGRES_HOST_PORT=5439 podman compose --profile dbport up -d dbport
+  #
+  # A shell variable beats the one in .env, so the second form needs no edit
+  # and no restart of anything else. That is what `alembic revision
+  # --autogenerate` wants, since it compares the models against a live
+  # database (ADR-0011); `podman compose exec postgres psql` needs no port at
+  # all. Take it down again with
+  # `podman compose --profile dbport rm -sf dbport`.
+  dbport:
+    profiles: ["dbport"]
+    image: docker.io/alpine/socat:1.8.0.3
+    command: tcp-listen:5432,fork,reuseaddr tcp-connect:postgres:5432
+    restart: "no"
+    ports:
+      # Loopback unless the host says otherwise, exactly as the web service.
+      - "${DB_BIND_ADDR:-127.0.0.1}:${POSTGRES_HOST_PORT:-5433}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # Schema changes run once, here, rather than from inside the application.
   # gunicorn starts several workers at once, so anything that creates tables at

@@ -381,13 +381,28 @@ built by importing the models of every app the *site configuration* says is
 installed, so migrations follow the app list.
 
 **Generating** a revision happens on the host, because the result is a file that
-belongs in the repository:
+belongs in the repository. Autogenerate compares the models against a live
+database, so this is the one job that wants the database port — which the
+suite does not publish by default (see
+[ADR-0027](adrs/0027-the-database-port-is-published-only-on-request.md)).
+Ask for it, for as long as it takes:
+
+```bash
+podman compose --profile dbport up -d dbport
+```
 
 ```bash
 export PODPACK_CONFIG=config/app.toml
 export SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://holdenweb_app:…@127.0.0.1:5433/holdenweb
 uv run alembic revision --autogenerate -m "what changed"
 ```
+
+```bash
+podman compose --profile dbport rm -sf dbport
+```
+
+`POSTGRES_HOST_PORT=5439 podman compose --profile dbport up -d dbport` picks a
+different number for one use, since a shell variable beats the one in `.env`.
 
 **Applying** one happens in the container, automatically at startup, or by hand:
 
@@ -498,14 +513,34 @@ This repository's own root is a rendered instance of the packaged substrate
 
 ## Ports
 
-| Service | Host port | Why not the obvious one |
+| Service | Host port | Notes |
 | --- | --- | --- |
 | Flask | `127.0.0.1:8458` | 8456 is the real site's local port; 8457 is the MongoDB lab |
-| PostgreSQL | `127.0.0.1:5433` | 5432 is very likely a natively installed `postgres` |
+| PostgreSQL | none | published only on request — see below |
 
-Offset on purpose: a lab that silently binds the production port is a lab that
-will one day be mistaken for production. Both bind to loopback only, so neither
-is reachable from the network. Change them in `.env` if they still clash.
+The web port is offset on purpose: a lab that silently binds the production
+port is a lab that will one day be mistaken for production. It binds to
+loopback only, so it is not reachable from the network; change it in `.env`
+if it clashes.
+
+**The database publishes nothing.** Nothing inside the suite needs it —
+the app and the migration service reach `postgres:5432` across the compose
+network — so the only beneficiary was the host, at the cost of a number every
+other deployment on the machine had to avoid. Two sites are otherwise
+isolated by `SITE_NAME` alone. Ask when you want it:
+
+```bash
+podman compose --profile dbport up -d dbport
+```
+
+```bash
+POSTGRES_HOST_PORT=5439 podman compose --profile dbport up -d dbport
+```
+
+A shell variable beats `.env`, so the second form chooses a number for one
+use without editing a committed file. `podman compose --profile dbport rm -sf
+dbport` takes it away again. See
+[ADR-0027](adrs/0027-the-database-port-is-published-only-on-request.md).
 
 ## Where everything lives
 
@@ -688,16 +723,17 @@ tail -f hostlogs/apps/notes/notes.log
 
 ## Talking to the database directly
 
-From the host, through the published port:
-
-```bash
-PGPASSWORD=holdenweb-app-password psql -h 127.0.0.1 -p 5433 -U holdenweb_app -d holdenweb
-```
-
-Or without a local psql installed:
+The shortest route needs no port and no local `psql`:
 
 ```bash
 podman compose exec postgres psql -U labadmin -d holdenweb
+```
+
+To use the host's own `psql` — or any other client — publish the port first
+(`podman compose --profile dbport up -d dbport`, see [Ports](#ports)):
+
+```bash
+PGPASSWORD=holdenweb-app-password psql -h 127.0.0.1 -p 5433 -U holdenweb_app -d holdenweb
 ```
 
 `holdenweb_app` is the *application* role: it can log in, connect to one

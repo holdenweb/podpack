@@ -71,7 +71,7 @@
     },
     "compose.yaml": {
       "class": "verbatim",
-      "sha256": "4a6f58981c7da742f8edf2ee98a2ee6bf7af43cd88c3368dee59fddf961dbf75"
+      "sha256": "aabc220468d99983341b083637a2d9925b22b71374a6de26438bea23b77c0dfe"
     },
     "config/pg_hba.conf": {
       "class": "verbatim",
