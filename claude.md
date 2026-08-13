@@ -301,8 +301,17 @@ database only from `SQLALCHEMY_DATABASE_URI`.
 
 ### Still open here
 
-- The MongoDB lab is still untracked inside the `holdenweb.com` working tree.
-  Move it or delete it.
+- The MongoDB lab now lives at `holdenweb.com/scratch/podman/`, untracked
+  (2026-08-13). Still runnable, no longer in anyone's way. The question it
+  leaves is a design one rather than housekeeping: **should podpack offer
+  MongoDB as an optional backing service?** It is not an app — an app is a
+  blueprint with endpoints, and a database belongs to the substrate, where
+  PostgreSQL is. The shape that would work is a compose service under a
+  profile with a site setting `COMPOSE_PROFILES=mongo` in `.env`, so that
+  `depends_on` still resolves, and the client wired into `app.extensions` by
+  the site's own `init` exactly as mail and login are (ADR-0025). The cost is
+  a second persistence story none of podpack's promises currently cover: one
+  `db.metadata`, one alembic history, `/_status` reporting one database.
 - **An app upgrade process, deliberately deferred.** Installing an app is
   handled; upgrading one to a version whose expectations have changed is not.
   Two known gaps, both harmless today because no app yet ships data:
@@ -444,7 +453,7 @@ rebuild rather than a reload, and `gunicorn --reload` covers development.
 3. **The package-upgrade workflow**, deliberately postponed until the site is
    fully operational: `uv lock --upgrade-package` is the interim mechanism,
    not the answer.
-4. Housekeeping: the MongoDB lab, `base_url`.
+4. Housekeeping: `base_url`. (The MongoDB lab is dealt with — see §4.)
 5. **Decide about `pp-pdf`'s two discovery routes.** It exposes both a
    `holdenweb.apps` entry point resolving to a bare blueprint and a `site_app`
    for podpack. Both work and are tested; the entry point is what keeps the
