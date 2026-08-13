@@ -153,13 +153,20 @@ files a site copies rather than imports, which also include everything Part 2
 deploys with. One command lays the whole set down:
 
 ```bash
-uv run podpack substrate init
+uv run podpack substrate init                       # postgres, the default
+uv run podpack substrate init --services mongodb    # or say what this site runs
 ```
 
 It derives the site's package from `pyproject.toml`, says what it resolved,
 and writes the alembic environment, the container files, and starter
 `.env.example` / `secrets.env.example` / `.gitignore` files — recording what
 it installed in `substrate.json`, which you commit.
+
+`--services` is the site owner's decision and nobody else's: an app cannot
+declare that it needs a store, and the default is `postgres` because every
+site so far has wanted one. It is not a decision you are stuck with —
+`podpack substrate services --add mongodb` enables another later, and
+`podpack substrate services` says what a site runs today.
 
 Two conventions arrive in that `.gitignore` and are worth knowing before you
 start dropping files anywhere: **`scripts/` is podpack's**, holding only the

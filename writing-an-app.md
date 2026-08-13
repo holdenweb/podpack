@@ -1240,8 +1240,14 @@ Honest notes, from building an app rather than imagining one.
 - **Table names are the one identifier podpack does not namespace**, and it can
   only warn about that rather than prevent it. The clash still lands on the site
   that installed both apps rather than on either author.
-- **An app cannot declare what it needs** — neither a podpack version nor a
-  service the site wires. Both are README prose and hope.
+- **An app cannot declare what it needs** — neither a podpack version, nor a
+  service the site wires, nor a backing store. The last of those is now a
+  decision rather than a gap: which core services a site runs is the site
+  owner's to make, independently of its apps
+  ([ADR-0028](adrs/0028-core-services-are-overlays-the-site-chooses.md)), so
+  an app that needs MongoDB says so in its README and reads
+  `MONGODB_URI` from the environment. A podpack version floor is still
+  prose and hope.
 - **Apps cannot ship migrations**, so every site regenerates your schema in its
   own history. Fine while a schema is stable.
 - **An app that ships changing data has no upgrade path**, and neither has one

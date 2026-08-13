@@ -459,6 +459,62 @@ alembic check     # should report no new upgrade operations
 
 # The container substrate
 
+## Core services
+
+A site chooses its backing stores. `compose.yaml` is the base — the site, its
+storage and the migration gate — and every store is an overlay beside it,
+named in `COMPOSE_FILE`:
+
+```
+COMPOSE_FILE=compose.yaml:compose.postgres.yaml
+```
+
+| Service | What it is |
+| --- | --- |
+| `postgres` | PostgreSQL, and the SQL database podpack's own `db` and alembic use |
+| `mongodb` | MongoDB, for apps that store documents rather than rows |
+
+```bash
+uv run podpack substrate services                 # what this site runs
+uv run podpack substrate services --add mongodb   # enable another
+```
+
+`--add` records the service, rewrites `COMPOSE_FILE`, and delivers its
+variables to `.env` and its secrets to `secrets.env.example` by the ordinary
+append rule. Three things stay yours, because podpack writes neither
+credentials nor host state: the entries in `secrets.env`, a run of
+`./scripts/prepare-host-dirs.sh`, and `podman compose down && ./scripts/up.sh`.
+
+**Choosing services is the site owner's job, taken independently of the
+installed apps.** An app cannot declare that it needs one — that would be a
+dependency-management problem where a sentence in a README will do. And
+there is no `--remove`: taking a store away is a decision about data rather
+than configuration, so edit `COMPOSE_FILE` yourself and nothing podpack owns
+will have destroyed anything.
+
+Each service publishes no host port, and brings its own on-request forwarder
+under a profile of its own name (see [Ports](#ports)):
+
+```bash
+podman compose --profile mongodb-port up -d mongodb-port
+MONGODB_HOST_PORT=27020 podman compose --profile mongodb-port up -d mongodb-port
+```
+
+**SQL is the one store an app may assume.** `db`, its single metadata and its
+one alembic history are core, so the alembic environment is in the base
+rather than in postgres's overlay — what is optional is the *server*, and a
+site may point `SQLALCHEMY_DATABASE_URI` at a managed PostgreSQL and run no
+container at all. A site running no SQL keeps every other part of podpack
+and has a `migrate` service with nothing to do.
+
+Why overlays and not compose profiles, since profiles are what they look
+like they are for: a service outside an enabled profile is not absent but
+*undefined*, so `web.depends_on: {postgres: …}` invalidates the entire
+project the moment the profile is off. Overlays merge `depends_on`
+additively, which is how the ordering guarantees survive being optional.
+Measured, and recorded in
+[ADR-0028](adrs/0028-core-services-are-overlays-the-site-chooses.md).
+
 ## Getting it, and keeping it current
 
 The substrate ships inside the podpack package, and a site installs it with
