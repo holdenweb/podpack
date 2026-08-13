@@ -101,10 +101,16 @@ MANAGED_KINDS = (VERBATIM, RENDERED)
 class Parameters:
     """The site facts substituted into rendered files and seeds.
 
-    Only `site_package` and `site_name` are recorded in the state file; the
-    database identity is consumed by the seeds at init and never needed
-    again -- and recording nothing password-shaped keeps the question of
-    secrets in a committed file from ever arising.
+    Everything except the password is recorded in the state file, so that a
+    later upgrade delivering a new variable whose default embeds one of these
+    substitutes *this site's* value rather than re-deriving a lab default.
+    They are all already visible in the committed `.example` files, so
+    recording them exposes nothing new.
+
+    The password deliberately is not, and that is what makes the CHANGEME
+    sentinel below reachable: an unrecorded parameter leaves its token in
+    place, and delivery marks it for the reader instead of inventing a
+    credential.
     """
 
     site_package: str
@@ -114,6 +120,8 @@ class Parameters:
     db_name: str = ""
     db_user: str = ""
     db_password: str = ""
+
+    RECORDED = ("site_package", "site_name", "web_port", "db_port", "db_name", "db_user")
 
     @staticmethod
     def build(site_package: str, **overrides: Any) -> "Parameters":
@@ -128,8 +136,34 @@ class Parameters:
         values.update({k: v for k, v in overrides.items() if v is not None})
         return Parameters(site_package=site_package, **values)
 
+    @staticmethod
+    def from_state(recorded: dict[str, str]) -> "Parameters":
+        """Rebuild from substrate.json, leaving what was not recorded unset.
+
+        State files written before a parameter was recorded simply lack it,
+        so each is defaulted individually rather than assumed present.
+        """
+        values: dict[str, Any] = {
+            key: recorded[key] for key in Parameters.RECORDED if key in recorded
+        }
+        site_package = values.pop("site_package")
+        for key in ("web_port", "db_port"):
+            if key in values:
+                values[key] = int(values[key])
+        # Never recorded, so it stays unresolved rather than being re-derived.
+        return Parameters.build(site_package, db_password="", **values)
+
+    def recorded(self) -> dict[str, str]:
+        return {key: str(getattr(self, key)) for key in self.RECORDED}
+
     def tokens(self) -> dict[str, str]:
-        return {
+        """Substitutions for this site, omitting anything unresolved.
+
+        An empty value means "not known here" rather than "the empty string":
+        leaving the token in place is what lets `_plan_var_delivery` mark it
+        CHANGEME instead of silently writing a wrong -- or blank -- default.
+        """
+        candidates = {
             "@@SITE_PACKAGE@@": self.site_package,
             "@@SITE_NAME@@": self.site_name,
             "@@WEB_HOST_PORT@@": str(self.web_port),
@@ -138,6 +172,7 @@ class Parameters:
             "@@DB_USER@@": self.db_user,
             "@@DB_PASSWORD@@": self.db_password,
         }
+        return {token: value for token, value in candidates.items() if value}
 
 
 @dataclass
@@ -262,10 +297,7 @@ def plan_init(site_dir: Path, params: Parameters, root: Traversable | Path) -> t
     baseline recording the *canonical* hash, so the edit stays visible.
     """
     actions: list[Action] = []
-    state = State(podpack_version=podpack_version(), parameters={
-        "site_package": params.site_package,
-        "site_name": params.site_name,
-    })
+    state = State(podpack_version=podpack_version(), parameters=params.recorded())
 
     for entry in MANIFEST:
         target = site_dir / entry.target
@@ -344,9 +376,11 @@ def plan_upgrade(
     """
     take_upstream = take_upstream or set()
     keep = keep or set()
-    params = Parameters.build(
-        state.parameters["site_package"], site_name=state.parameters["site_name"]
-    )
+    params = Parameters.from_state(state.parameters)
+    # Captured before the delivery pass below extends it: an untracked live
+    # .env is seeded from what this site has *already* been offered, and the
+    # variables this very upgrade introduces must not count as offered.
+    example_delivered = set(state.delivered_vars.get(".env.example", []))
     actions: list[Action] = []
     conflicts = 0
     new_version = podpack_version()
@@ -368,8 +402,11 @@ def plan_upgrade(
                 _drop_stale_new(actions, site_dir, entry.target)
             elif entry.target in keep:
                 # The site's edit wins; advancing the baseline acknowledges
-                # the upstream change without applying it.
+                # the upstream change without applying it. The .new copy goes
+                # either way -- a resolved conflict should leave no artifact,
+                # and one left behind would quietly go stale.
                 actions.append(Action(entry.target, "kept (upstream acknowledged)"))
+                _drop_stale_new(actions, site_dir, entry.target)
             elif disk is None:
                 actions.append(Action(entry.target, "restored", content=rendered,
                                       executable=entry.executable))
@@ -405,9 +442,22 @@ def plan_upgrade(
                 actions.append(Action(entry.target, "removed by site (left alone)"))
 
     # Live .env: same append-only delivery, from the .env.example canon.
+    #
+    # Tracked on first sighting rather than only when init saw one, because the
+    # documented order creates it *after* init -- init is what writes the
+    # example it is copied from. Requiring it at init meant a site following the
+    # guide never received a new variable, silently and for ever.
     live_env = site_dir / ".env"
-    if live_env.is_file() and ".env" in state.delivered_vars:
+    if live_env.is_file():
         example = render(_entry_for(".env.example"), params, root).decode("utf-8")
+        if ".env" not in state.delivered_vars:
+            # What the file already defines, plus what its example had been
+            # offered before today: adopting must neither dump the whole
+            # example in nor swallow the variables this upgrade introduces.
+            state.delivered_vars[".env"] = sorted(
+                example_delivered | set(env_var_names(live_env.read_text()))
+            )
+            actions.append(Action(".env", "tracked", detail="append-only variable delivery"))
         actions.extend(_plan_var_delivery(site_dir, state, ".env", example, new_version))
 
     # The live secrets.env is never written: an appended default in that file
@@ -505,9 +555,7 @@ def apply(actions: list[Action], site_dir: Path) -> None:
 
 def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list[str], bool]:
     """One line per file, and whether an upgrade would act or conflict."""
-    params = Parameters.build(
-        state.parameters["site_package"], site_name=state.parameters["site_name"]
-    )
+    params = Parameters.from_state(state.parameters)
     lines: list[str] = []
     pending = False
 
@@ -554,5 +602,22 @@ def status(site_dir: Path, state: State, root: Traversable | Path) -> tuple[list
             else:
                 word = f"seeded at {record.get('seeded_by', '?')}, since edited"
         lines.append(f"{entry.target:32} {word}")
+
+    # The live .env is not a manifest file -- podpack never writes it wholesale
+    # -- but it does receive new variables, so leaving it out of the report
+    # would hide the one thing an upgrade will do to it.
+    live_env = site_dir / ".env"
+    if live_env.is_file():
+        example = render(_entry_for(".env.example"), params, root).decode("utf-8")
+        undelivered = [
+            name for name in env_var_names(example)
+            if name not in set(state.delivered_vars.get(".env", []))
+            and name not in set(env_var_names(live_env.read_text()))
+        ]
+        if undelivered:
+            pending = True
+            lines.append(f"{'.env':32} new variables pending: {', '.join(undelivered)}")
+        else:
+            lines.append(f"{'.env':32} ok (append-only)")
 
     return lines, pending

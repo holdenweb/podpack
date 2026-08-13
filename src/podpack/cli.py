@@ -165,10 +165,26 @@ def _load_or_complain(site_dir: Path) -> State | None:
     return state
 
 
+def _unknown_targets(paths: list[str]) -> list[str]:
+    managed = {entry.target for entry in substrate.MANIFEST
+               if entry.kind in substrate.MANAGED_KINDS}
+    return sorted(set(paths) - managed)
+
+
 def _upgrade(args: argparse.Namespace) -> int:
     site_dir = _site_dir(args)
     state = _load_or_complain(site_dir)
     if state is None:
+        return 2
+    # A mistyped path would otherwise match nothing and vanish, leaving the
+    # conflict it was meant to resolve reported again with no hint why.
+    unknown = _unknown_targets(args.take_upstream + args.keep)
+    if unknown:
+        print("not managed substrate files: " + ", ".join(unknown))
+        print("resolvable paths are: " + ", ".join(
+            entry.target for entry in substrate.MANIFEST
+            if entry.kind in substrate.MANAGED_KINDS
+        ))
         return 2
     actions, state, conflicts = substrate.plan_upgrade(
         site_dir,
@@ -211,9 +227,13 @@ def _diff(args: argparse.Namespace) -> int:
     state = _load_or_complain(site_dir)
     if state is None:
         return 2
-    params = Parameters.build(
-        state.parameters["site_package"], site_name=state.parameters["site_name"]
-    )
+    params = Parameters.from_state(state.parameters)
+    unknown = sorted(set(args.paths) - {entry.target for entry in substrate.MANIFEST})
+    if unknown:
+        # Silence here reads as "no differences", which is the opposite of
+        # what a typo should tell you.
+        print("not substrate files: " + ", ".join(unknown))
+        return 2
     targets = args.paths or [entry.target for entry in substrate.MANIFEST]
     for entry in substrate.MANIFEST:
         if entry.target not in targets:

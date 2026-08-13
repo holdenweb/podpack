@@ -214,6 +214,9 @@ def test_take_upstream_and_keep_resolve_a_conflict_each_way(site: Path, upstream
     assert (site / "scripts" / "up.sh").read_text().endswith("# upstream\n")
     assert not (site / "scripts" / "up.sh.new").exists()
     assert (site / "compose.yaml").read_text().endswith("# mine\n")
+    # A resolved conflict leaves no artifact either way round: a .new kept
+    # after --keep would sit there going quietly stale.
+    assert not (site / "compose.yaml.new").exists()
     # Both baselines now acknowledge the upstream version...
     upstream_compose = (upstream / "compose.yaml").read_bytes()
     assert state.files["compose.yaml"]["sha256"] == sha256(upstream_compose)
@@ -304,6 +307,57 @@ def test_a_live_env_receives_new_variables_too(site: Path, upstream: Path) -> No
     assert "NEW_KNOB=1" in text
 
 
+def test_an_env_created_after_init_is_still_delivered_to(site: Path, upstream: Path) -> None:
+    """The documented order: init writes .env.example, the site copies it after.
+
+    Tracking only what init saw meant a site following the guide never
+    received a new variable -- silently, and for ever.
+    """
+    initialise(site)
+    shutil.copy(site / ".env.example", site / ".env")
+    with (upstream / "env.example").open("a") as stream:
+        stream.write("\nNEW_KNOB=1\n")
+
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+    state.save(site)
+
+    assert "NEW_KNOB=1" in (site / ".env").read_text()
+    # And exactly once: a second upgrade has nothing left to deliver.
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+    assert (site / ".env").read_text().count("NEW_KNOB=1") == 1
+
+
+def test_status_reports_a_live_envs_pending_variables(site: Path, upstream: Path) -> None:
+    initialise(site)
+    shutil.copy(site / ".env.example", site / ".env")
+    with (upstream / "env.example").open("a") as stream:
+        stream.write("\nNEW_KNOB=1\n")
+
+    lines, pending = substrate.status(site, state_of(site), upstream)
+    assert pending
+    assert any(line.startswith(".env ") and "NEW_KNOB" in line for line in lines)
+
+
+def test_a_delivered_default_uses_the_sites_own_parameters(site: Path, upstream: Path) -> None:
+    """A new variable's default is rendered from what this site chose at init,
+    not from re-derived lab values -- and an unrecorded parameter (the
+    password) is marked rather than invented."""
+    assert main(["substrate", "init", "--dir", str(site), "--yes",
+                 "--web-port", "9000", "--db-user", "custom_role"]) == 0
+    with (upstream / "env.example").open("a") as stream:
+        stream.write("\nMETRICS_URL=http://localhost:@@WEB_HOST_PORT@@/m?u=@@DB_USER@@\n")
+        stream.write("PROBE_PASSWORD=@@DB_PASSWORD@@\n")
+
+    actions, state, _ = plan_upgrade(site, state_of(site), upstream)
+    substrate.apply(actions, site)
+
+    text = (site / ".env.example").read_text()
+    assert "METRICS_URL=http://localhost:9000/m?u=custom_role" in text
+    assert "PROBE_PASSWORD=CHANGEME" in text
+
+
 def test_secrets_env_is_never_written_and_new_secrets_are_reported(
     site: Path, upstream: Path
 ) -> None:
@@ -353,6 +407,25 @@ def test_upgrade_exit_code_reports_conflicts(
 def test_commands_refuse_an_uninitialised_site(tmp_path: Path) -> None:
     for command in ("upgrade", "status", "diff"):
         assert main(["substrate", command, "--dir", str(tmp_path)]) == 2
+
+
+def test_a_mistyped_resolution_path_is_refused_rather_than_ignored(
+    site: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Silently matching nothing reads as 'resolution did not work' with no clue."""
+    initialise(site)
+    assert main(["substrate", "upgrade", "--dir", str(site),
+                 "--take-upstream", "compose.yml"]) == 2   # .yml, not .yaml
+    assert "compose.yml" in capsys.readouterr().out
+
+
+def test_a_mistyped_diff_path_is_refused_rather_than_ignored(
+    site: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Silence from diff reads as 'no differences', the opposite of the truth."""
+    initialise(site)
+    assert main(["substrate", "diff", "--dir", str(site), "Containerfil"]) == 2
+    assert "Containerfil" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

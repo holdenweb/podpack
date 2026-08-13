@@ -144,35 +144,32 @@ hostlogs/apps/notes/notes.log       # the app's own log
 
 Its own pages will still fail until the next step gives them a table.
 
-### 7. Create the schema
+### 7. Take the substrate, and create the schema
 
 An app's tables are the *site's* to migrate — one history for the whole site,
 per [ADR-0009](adrs/0009-one-alembic-history.md) — so alembic lives here, not in
-the app.
+the app. The alembic environment arrives with podpack's **substrate**: the
+files a site copies rather than imports, which also include everything Part 2
+deploys with. One command lays the whole set down:
 
 ```bash
-uv run alembic init alembic
+uv run podpack substrate init
 ```
 
-`alembic init` generates `alembic/env.py` with `target_metadata = None` about
-two thirds down. Three changes to that file, shown in place:
+It derives the site's package from `pyproject.toml`, says what it resolved,
+and writes the alembic environment, the container files, and starter
+`.env.example` / `secrets.env.example` / `.gitignore` files — recording what
+it installed in `substrate.json`, which you commit. Everything it writes is
+yours to edit; `podpack substrate status` will tell you, file by file, how
+your copy relates to the installed podpack, and `podpack substrate upgrade`
+brings a copy forward when podpack ships fixes (see the README's "Keeping
+the substrate current").
 
-```python
-import os                                   # add, with the other imports
-from logging.config import fileConfig
-...
-config = context.config                     # already there -- do not add it again
-
-if os.environ.get("SQLALCHEMY_DATABASE_URI"):        # add these two lines
-    config.set_main_option("sqlalchemy.url", os.environ["SQLALCHEMY_DATABASE_URI"])
-...
-from podpack.migrations import target_metadata as _tm   # replaces
-target_metadata = _tm()                                 #   target_metadata = None
-```
-
-Then in `alembic.ini`, delete the one uncommented `sqlalchemy.url = ...` line.
-The URI is a secret and belongs in the environment, where the running site reads
-it too — so the two can never disagree about which database they mean.
+The shipped `alembic/env.py` needs no editing: it reads
+`SQLALCHEMY_DATABASE_URI` from the environment — the same variable the
+running site uses, so the two can never disagree about which database they
+mean — and finds your config file through `PODPACK_CONFIG`, defaulting to
+`config/app.toml`.
 
 ```bash
 uv run alembic revision --autogenerate -m "installed app schema"
@@ -204,21 +201,15 @@ symptom of the clash is 403s that look like an application bug.)*
 
 ## Part 2 — containerising it
 
-podpack's own repository *is* the substrate. A site copies it:
+The container files are already in place: `podpack substrate init` wrote them
+in step 7, rendered for this site — the Containerfile's gunicorn line names
+*your* factory, and the `.example` files carry your site's name and database
+identity. (A site that skipped step 7 runs the same command now.) Two things
+remain yours to check:
 
-```bash
-cp -r /path/to/podpack/{container,db-init,scripts} .
-cp /path/to/podpack/{Containerfile,compose.yaml,.dockerignore,.env.example,secrets.env.example} .
-cp /path/to/podpack/config/{postgresql,pg_hba,pg_ident}.conf config/
-```
-
-Then:
-
-| File | Change |
+| File | Check |
 | --- | --- |
-| `Containerfile` | `'podpack:create_app()'` → `'mysite:create_app()'`; drop the `COPY README.md` line unless you have one |
-| `.env.example` | `SITE_NAME`, and ports that clash with nothing already running |
-| `secrets.env.example` | `POSTGRES_DB`, `POSTGRES_APP_USER`, and the URI to match |
+| `.env.example` | ports that clash with nothing already running on this machine (`--web-port`/`--db-port` at init, or edit now) |
 | `pyproject.toml` | the dependency sources — see below |
 
 Edit the `.example` files, not `.env` and `secrets.env`: the next step creates
@@ -275,9 +266,11 @@ you want that question answerable later.
 
 Honest notes, from doing this rather than imagining it.
 
-- **A site copies the substrate.** Eight files and three directories, and
-  nothing keeps a site's copy in step with podpack's afterwards. A `podpack
-  init` command would fix that; there isn't one.
+- **The substrate upgrade delivers parameters, not prose.** `podpack
+  substrate upgrade` brings fixed files forward and appends newly-introduced
+  configuration variables, but improvements to the *commentary* in your
+  `.example` files never reach an existing site — those files became yours on
+  delivery (see [ADR-0026](adrs/0026-the-substrate-ships-in-the-package-and-upgrades-by-manifest.md)).
 - **Apps cannot ship migrations.** Every site installing an app regenerates that
   app's tables in its own history. Fine while a schema is stable; it is the same
   gap as the deferred app-upgrade problem.

@@ -149,6 +149,15 @@ No state and no host-specific setting lives inside a container: persistent state
 bind-mounted from `$HOST_DATA_DIR`, host config read-only from `./config`,
 secrets through the environment.
 
+**The substrate now ships inside the package** (`src/podpack/substrate/data/`,
+2026-08-13) and a site takes it with `podpack substrate init` and keeps it
+current with `substrate upgrade` — three-way sync, never-clobber conflicts,
+append-only configuration delivery; ADR-0026 has the rules. This repository's
+root is itself a rendered instance of the packaged tree (`substrate.json` at
+the root records it) and `test_the_repo_root_is_the_rendered_substrate` pins
+the two byte-identical: **edit a substrate file at the root and its copy under
+`src/podpack/substrate/data/` together**, or that test will tell you.
+
 **Two environment files, split by what a restore does to them rather than by
 secrecy.** `.env` holds what is *expected* to change on a new host — paths,
 ports, `SITE_NAME`, worker count — and is the file you edit. `secrets.env` holds
@@ -309,6 +318,11 @@ database only from `SQLALCHEMY_DATABASE_URI`.
   code** — `pp_pdf` is real and ships none. Solving it early would mean guessing
   at what versioned seed data needs to do; solving it late means one migration.
 
+  Since 2026-08-13 the machinery for the eventual answer exists: the substrate
+  sync engine (`podpack.substrate`) is deliberately generic — manifest,
+  baselines of what podpack rendered, three-way rules — and app shipped-data
+  is its designed-for second consumer. Still deferred, same trigger.
+
 ---
 
 ## 5. `pp-pdf`: the first external plugin — reconciled
@@ -360,16 +374,19 @@ should wait until there are enough apps for the list to feel like a chore.
 
 ---
 
-## 6. `holdenweb.com`: not yet adapted
+## 6. `holdenweb.com`: adapted, on its `podpack` branch
 
-Untouched by this work. Flask, Python ≥3.12, `src/` layout, `uv_build`, alembic
-baseline migration already committed (`ddec9f8`).
-`src/holdenweb/__init__.py` is still factory + models + views in one 319-line
-file, with a hardcoded `SECTIONS` list and blueprints registered by hand.
-
-Adapting it means becoming a podpack site: `create_app(site_package="holdenweb")`,
-its `SECTIONS` becoming nav contributed by apps, its templates staying as the
-site layer that overrides everything below.
+Converted 2026-08-12/13 (branch `podpack` in that repo). Its factory delegates
+to `podpack.create_app(site_package="holdenweb", init=_wire)`; its own routes
+are the in-repo app `main` (front page, `/config`, `/ip`, `/python`, legacy
+redirects); content moved out to `podpack-pages` (one name space, Markdown
+searched before HTML, at `/pages/`), QR codes to `podpack-qrcode`, and the
+built-in PDF tools were deleted in favour of installing `pp_pdf`. Its alembic
+history gained a true root revision, so a fresh database builds from empty —
+which is also what the `migrate` container needs. The two new apps live in
+/tmp at Steve's request until he creates their GitHub repositories; the site's
+sources are local paths until then, which is also why its container build is
+still blocked (a path source cannot survive a build).
 
 ### Guardrails still outstanding from the original brief
 
@@ -417,10 +434,18 @@ rebuild rather than a reload, and `gunicorn --reload` covers development.
 
 ## 7. What's next
 
-1. **Adapt `holdenweb.com`** to be a podpack site (§6), starting with config.
-   This is the milestone; everything else here is small.
-2. Housekeeping: the MongoDB lab, `base_url`.
-3. **Decide about `pp-pdf`'s two discovery routes.** It exposes both a
+1. **Publishing** (Steve's own checklist): GitHub repositories for
+   `podpack-pages` and `podpack-qrcode` (currently in /tmp), and pushing this
+   repository's and `pp-pdf`'s unpushed commits. Until then every consuming
+   site locks local paths, and no container build can succeed.
+2. **Then holdenweb.com goes to git sources**: repoint its four
+   `[tool.uv.sources]`, `uv lock`, and its compose stack comes up — the
+   remaining step of its adaptation (§6).
+3. **The package-upgrade workflow**, deliberately postponed until the site is
+   fully operational: `uv lock --upgrade-package` is the interim mechanism,
+   not the answer.
+4. Housekeeping: the MongoDB lab, `base_url`.
+5. **Decide about `pp-pdf`'s two discovery routes.** It exposes both a
    `holdenweb.apps` entry point resolving to a bare blueprint and a `site_app`
    for podpack. Both work and are tested; the entry point is what keeps the
    package usable by a site that has never heard of this framework. Keep both,

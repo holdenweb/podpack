@@ -444,6 +444,50 @@ alembic check     # should report no new upgrade operations
 
 # The container substrate
 
+## Getting it, and keeping it current
+
+The substrate ships inside the podpack package, and a site installs it with
+one command rather than by copying files out of this repository:
+
+```bash
+uv run podpack substrate init      # lay it down, or adopt a hand-copied set
+uv run podpack substrate status    # how every file relates to the installed podpack
+uv run podpack substrate upgrade   # bring the copy forward after upgrading podpack
+uv run podpack substrate diff      # what exactly differs, per file
+```
+
+`init` derives the site's package from `pyproject.toml` (override with
+`--site-package` and friends), renders the one parameterised line — the
+Containerfile's gunicorn factory — and records what it wrote in
+`substrate.json`, which the site commits. Run on a site that already copied
+the substrate by hand, it adopts in place: identical files baseline
+silently, edited ones are kept and reported.
+
+`upgrade` is a three-way comparison per managed file, against the recorded
+baseline of **what podpack rendered**: files you have not touched take
+upstream fixes; files you edited are kept, and said so; a file changed on
+both sides gets podpack's version written *beside* it as `<file>.new` and an
+exit status of 1 — resolve each with `--take-upstream PATH` or `--keep
+PATH`. Nothing is ever clobbered. `status --check` exits 1 if an upgrade
+would act, which is the CI hook.
+
+Configuration is different, by design: once delivered, `.env.example`,
+`secrets.env.example` and a live `.env` change **only by the addition of new
+parameters** — an upgrade appends variables this site has never been given
+(each offered exactly once, so deleting one is respected) and never rewrites
+a line. The live `secrets.env` is never written at all: a newly-required
+secret is reported for you to add by hand, because an appended lab default
+in that file would be a weak credential on its way to production.
+
+Out of the command's reach, always: `config/app.toml`, `alembic/versions/`,
+`pyproject.toml`, the lockfile, your source, and anything in `scripts/` it
+did not put there. See
+[ADR-0026](adrs/0026-the-substrate-ships-in-the-package-and-upgrades-by-manifest.md)
+for the full rules and what was rejected.
+
+This repository's own root is a rendered instance of the packaged substrate
+— podpack is its own first consumer — and a test pins the two byte-identical.
+
 ## Ports
 
 | Service | Host port | Why not the obvious one |
