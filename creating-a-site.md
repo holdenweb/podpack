@@ -159,7 +159,16 @@ uv run podpack substrate init
 It derives the site's package from `pyproject.toml`, says what it resolved,
 and writes the alembic environment, the container files, and starter
 `.env.example` / `secrets.env.example` / `.gitignore` files — recording what
-it installed in `substrate.json`, which you commit. Everything it writes is
+it installed in `substrate.json`, which you commit.
+
+Two conventions arrive in that `.gitignore` and are worth knowing before you
+start dropping files anywhere: **`scripts/` is podpack's**, holding only the
+two files it manages, and **`scratch/` is yours** — experiments, one-off
+utilities, notes — ignored so it never reaches a commit or a build context.
+The separation is not load-bearing (the command walks a manifest and never
+sweeps a directory) but a mixed `scripts/` is an invitation to a mistake:
+holdenweb.com kept seven personal scripts beside the two managed ones for a
+year. Everything it writes is
 yours to edit; `podpack substrate status` will tell you, file by file, how
 your copy relates to the installed podpack, and `podpack substrate upgrade`
 brings a copy forward when podpack ships fixes (see the README's "Keeping
@@ -266,11 +275,17 @@ you want that question answerable later.
 
 Honest notes, from doing this rather than imagining it.
 
-- **The substrate upgrade delivers parameters, not prose.** `podpack
-  substrate upgrade` brings fixed files forward and appends newly-introduced
-  configuration variables, but improvements to the *commentary* in your
-  `.example` files never reach an existing site — those files became yours on
-  delivery (see [ADR-0026](adrs/0026-the-substrate-ships-in-the-package-and-upgrades-by-manifest.md)).
+- **The substrate upgrade delivers parameters, not prose — and nothing at
+  all to a seeded file.** `podpack substrate upgrade` brings managed files
+  forward and appends newly-introduced configuration variables, but the
+  *seeded* files (`.gitignore`, the `.example` pair, the README stub) became
+  yours on delivery and are never touched again
+  ([ADR-0026](adrs/0026-the-substrate-ships-in-the-package-and-upgrades-by-manifest.md)).
+  So an improvement to a seed reaches new sites only. When podpack adds a
+  line worth having — as it did for `scratch/` and `dev.db` — an existing
+  site copies it by hand, and `podpack substrate diff` will not show it,
+  because a seeded file is not compared. Watching podpack's own
+  `src/podpack/substrate/data/gitignore` is the only way to notice.
 - **Apps cannot ship migrations.** Every site installing an app regenerates that
   app's tables in its own history. Fine while a schema is stable; it is the same
   gap as the deferred app-upgrade problem.

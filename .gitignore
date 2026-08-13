@@ -17,3 +17,8 @@ dist/
 # a manifest and never sweeps a directory -- but a mixed directory is an
 # invitation to a mistake nobody needs.
 scratch/
+
+# See the note in src/podpack/substrate/data/gitignore -- the seed a new site
+# gets. This file is the same thing, one generation older.
+dev.db
+src/instance/

@@ -20,6 +20,14 @@
 hostdata/
 hostlogs/
 
+# The site's own experiments and one-off utilities. Nothing reaches the image
+# either way -- the Containerfile copies named paths rather than `.` -- but a
+# scratch directory is where a database dump or a big sample file lands, and
+# there is no reason to send it to the build daemon. Unlike the seeded
+# .gitignore, this file is managed, so the convention travels to sites already
+# in the field.
+scratch/
+
 # A macOS venv, wrong architecture and wrong absolute paths for the image.
 .venv/
 

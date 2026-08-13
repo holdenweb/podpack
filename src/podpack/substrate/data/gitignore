@@ -15,6 +15,13 @@ __pycache__/
 .pytest_cache/
 dist/
 
+# The SQLite database creating-a-site.md has you make before there is a
+# PostgreSQL to talk to, and the instance folder Flask-SQLAlchemy resolves a
+# *relative* SQLite path against -- which is the trap that document warns
+# about, so both belong here.
+dev.db
+src/instance/
+
 # Personal working files -- experiments, one-off utilities, notes to self.
 # Kept here rather than in scripts/, which holds only the files `podpack
 # substrate` manages. The separation is not load-bearing -- the engine walks

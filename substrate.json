@@ -31,7 +31,7 @@
   "files": {
     ".dockerignore": {
       "class": "verbatim",
-      "sha256": "cd6a30c44236eed4bce56550fb6db07f202cb10b1254f959a510919e1ca55fe4"
+      "sha256": "3baa54f8b01619d34a146e46afb10878454a0bf1c24d88478760e09c6ad1b42b"
     },
     ".env.example": {
       "class": "config",
