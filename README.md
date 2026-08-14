@@ -116,6 +116,37 @@ site_app = SiteApp(
 | `nav` | `Section(label, endpoint)` entries contributed to the site's navigation, in installation order. |
 | `init` | Optional `callable(app)`, run before the blueprint is registered, for config keys and services. |
 
+Two methods are optional overrides rather than fields, because an app that
+wants them usually wants both and usually has state to consult:
+
+```python
+class Notes(SiteApp):
+    def healthz(self):
+        return Health(ok=store.reachable(), detail="mongodb unreachable")
+
+    def status(self):
+        return {"queued": store.pending()}
+
+site_app = Notes(blueprint=blueprint, url_prefix="/notes")
+```
+
+| Method | What podpack does with it |
+| --- | --- |
+| `healthz()` | Called on every `/healthz`. Returns `Health(ok, detail, fatal)`, or `None` for "not reported" — which is *not* the same as healthy. |
+| `status()` | Called on every `/_status`. Returns a mapping, reported under that app's `reported` key. |
+
+Both are called in an app context, both may do I/O, and podpack reports how
+long `healthz()` took so a slow check is visible rather than mysterious.
+**An exception in either is caught and reported**, never propagated: a
+health check is the last thing that should be able to take a site down, and
+a diagnostic that needs diagnosing is worth nothing.
+
+**A failing app does not by itself make the site unhealthy.** `/healthz`
+stays 200 and names the app, because the container healthcheck gates the
+whole stack on that answer — one broken feature must not stop a site
+serving the rest. An app whose absence genuinely leaves the site pointless
+says `fatal=True` and gets a 503.
+
 Install it by adding its **import name** to `apps` in the site's config file.
 Apps are installed in the order listed: nav entries appear in that order, and an
 app's `init` may rely on a service an earlier one registered.

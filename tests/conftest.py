@@ -56,6 +56,10 @@ def site(
 
     def _build(**overrides: Any) -> Flask:
         config = {**host_config, **overrides.pop("host_config", {})}
+        # A test site is an operator's by default, so that the many tests
+        # reading /_status need not each say so. The guard itself is tested
+        # by passing something else.
+        overrides.setdefault("admin", lambda: True)
         app = create_app(
             host_config=config,
             data_root=tmp_path / "data",

@@ -48,8 +48,28 @@ _ALREADY_DEFINED = re.compile(r"Table '([^']+)' is already defined")
 
 
 @dataclass(frozen=True)
+class Health:
+    """What an app says about itself when podpack asks.
+
+    `fatal` is opt-in and rarely right: `/healthz` gates the whole stack
+    through the container healthcheck, so an app that marks its own outage
+    fatal is asking for one broken feature to stop the site from serving the
+    others. Say it only when the site genuinely has no purpose without you.
+    """
+
+    ok: bool
+    detail: str = ""
+    fatal: bool = False
+
+
+@dataclass(frozen=True)
 class SiteApp:
-    """An installable unit of site functionality."""
+    """An installable unit of site functionality.
+
+    Subclass it to report health or status: both methods return None by
+    default, which podpack reports as "not reported" rather than as healthy.
+    Absence of an answer is not an answer.
+    """
 
     blueprint: Blueprint
     url_prefix: str | None = None
@@ -68,6 +88,32 @@ class SiteApp:
     """Called before the blueprint is registered, for config keys and services
     the app needs. The site's own config is already loaded by this point, so an
     app can read its section of the host config file here."""
+
+    def healthz(self) -> "Health | None":
+        """Override to say whether this app is working.
+
+        Called in an app context on every `/healthz`, which the container
+        healthcheck hits every ten seconds -- so keep it cheap. It may do
+        I/O (pinging the store you depend on is the whole point), and
+        podpack reports how long it took so a slow check is visible rather
+        than mysterious. An exception here is caught and reported as an
+        unhealthy app, never as a broken site.
+        """
+        return None
+
+    def status(self) -> dict[str, Any] | None:
+        """Override to add this app's own facts to `/_status`.
+
+        Named `status` rather than `_status`: the endpoint's underscore marks
+        podpack's reserved URL namespace, while a leading underscore on a
+        method you are meant to override would say the opposite of what it
+        means.
+
+        Remember what `/_status` is for and who may read it -- report what
+        an operator needs to diagnose a mount or a grant, not the contents
+        of your tables.
+        """
+        return None
 
     @property
     def name(self) -> str:
@@ -99,6 +145,14 @@ class PodpackState:
     host_config: dict[str, Any]
     data_root: Path
     log_root: Path
+    admin: "Callable[[], bool] | None" = None
+    """Whether the current request is an operator's.
+
+    podpack has no login of its own -- authentication belongs to the site
+    (ADR-0025) -- so it cannot ask flask-security anything. The site supplies
+    the predicate instead, and podpack asks it before reporting anything
+    about the site's own configuration. `None` means nobody qualifies.
+    """
     apps: dict[str, SiteApp] = field(default_factory=dict)
     nav: list[Section] = field(default_factory=list)
 

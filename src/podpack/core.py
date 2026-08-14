@@ -10,14 +10,16 @@ The third is `/`, and it is a *fallback* rather than a fixture -- see
 """
 
 import os
+import time
 
 import sqlalchemy as sa
-from flask import Blueprint, Flask, current_app, jsonify, render_template
+from flask import Blueprint, Flask, abort, current_app, jsonify, render_template
 from flask.typing import ResponseReturnValue
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
 from .paths import unclaimed
+from .registry import SiteApp
 
 core_blueprint = Blueprint("podpack", __name__)
 
@@ -47,15 +49,72 @@ def install_home_page(app: Flask) -> None:
         return render_template("index.html", title=state.host_config["site"]["name"])
 
 
+def _app_health() -> tuple[dict[str, dict[str, object]], bool]:
+    """Ask every installed app how it is, and how long it took to answer.
+
+    An app that raises is reported unhealthy rather than allowed to break the
+    endpoint: a health check is the last thing that should be able to take a
+    site down by failing.
+
+    A failure is not fatal unless the app says so. `/healthz` gates the whole
+    stack through the container healthcheck, so defaulting to fatal would let
+    one broken feature stop a site from serving the rest.
+    """
+    reports: dict[str, dict[str, object]] = {}
+    fatal = False
+    for name, site_app in current_app.extensions["podpack"].apps.items():
+        started = time.monotonic()
+        try:
+            health = site_app.healthz()
+        except Exception as exc:  # noqa: BLE001 -- an app's bug is not the site's
+            reports[name] = {"status": "unhealthy", "detail": f"{type(exc).__name__}: {exc}"}
+            continue
+        finally:
+            elapsed = round((time.monotonic() - started) * 1000, 1)
+        if health is None:
+            continue          # not reported is not the same as healthy
+        reports[name] = {
+            "status": "ok" if health.ok else "unhealthy",
+            "ms": elapsed,
+        }
+        if health.detail:
+            reports[name]["detail"] = health.detail
+        if not health.ok and health.fatal:
+            fatal = True
+            reports[name]["fatal"] = True
+    return reports, fatal
+
+
 @core_blueprint.route("/healthz")
 def healthz() -> ResponseReturnValue:
-    """Liveness *and* readiness: the site is no use without its database."""
+    """Liveness *and* readiness: the site is no use without its database.
+
+    Installed apps may add to that, and by default may only *add* to the
+    report rather than to the verdict -- see `_app_health`.
+    """
+    body: dict[str, object] = {"status": "ok", "database": "ok"}
+    healthy = True
     try:
         db.session.execute(sa.text("SELECT 1"))
     except SQLAlchemyError as exc:
         db.session.rollback()
-        return jsonify(status="unhealthy", database=str(exc)), 503
-    return jsonify(status="ok", database="ok")
+        body["database"] = str(exc)
+        healthy = False
+
+    reports, fatal = _app_health()
+    if reports:
+        # Detail is an app's own words about its own failure, which may name
+        # a host or a path. The container healthcheck reads the status code
+        # and nothing else, so the public answer says only which app is
+        # unwell; the sentence is in /_status, behind the guard.
+        operator = _is_operator()
+        body["apps"] = reports if operator else {
+            name: {"status": report["status"]} for name, report in reports.items()
+        }
+    if not healthy or fatal:
+        body["status"] = "unhealthy"
+        return jsonify(**body), 503
+    return jsonify(**body)
 
 
 def _database_identity() -> dict[str, str]:
@@ -83,6 +142,37 @@ def _database_identity() -> dict[str, str]:
     return {"database": row[0], "database_user": row[1], "database_schema": row[2]}
 
 
+def _reported(site_app: SiteApp) -> dict[str, object]:
+    """An app's own contribution, ready to merge, or why it could not make one.
+
+    Returns an empty mapping when the app says nothing, so `reported` is
+    absent rather than null -- and a raising app is reported rather than
+    allowed to break the one endpoint an operator reaches for when something
+    is already wrong.
+    """
+    try:
+        reported = site_app.status()
+    except Exception as exc:  # noqa: BLE001 -- a diagnostic must not need diagnosing
+        return {"reported": {"error": f"{type(exc).__name__}: {exc}"}}
+    return {} if reported is None else {"reported": reported}
+
+
+def _is_operator() -> bool:
+    """Whether this request may read the site's own configuration.
+
+    A predicate the *site* supplies, because podpack has no login of its own
+    (ADR-0025). An exception in it counts as a refusal: a guard that fails
+    open is not a guard.
+    """
+    admin = current_app.extensions["podpack"].admin
+    if admin is None:
+        return False
+    try:
+        return bool(admin())
+    except Exception:  # noqa: BLE001 -- a broken guard denies, it does not admit
+        return False
+
+
 @core_blueprint.route("/_status")
 def status() -> ResponseReturnValue:
     """Report where every piece of this site's state actually lives.
@@ -92,6 +182,11 @@ def status() -> ResponseReturnValue:
     named. It reports the app list too, so that "did my config edit take
     effect?" is answerable without reading the container's environment.
     """
+    if not _is_operator():
+        # 404 rather than 403: this route's existence, and the fact that a
+        # site is a podpack site at all, is itself information an operator
+        # has no reason to publish.
+        abort(404)
     state = current_app.extensions["podpack"]
     return jsonify(
         **_database_identity(),
@@ -131,6 +226,10 @@ def status() -> ResponseReturnValue:
                 "stored_files": sorted(
                     p.name for p in (state.data_root / name).iterdir() if p.is_file()
                 ),
+                # Whatever the app itself chooses to report. Absent when it
+                # says nothing, so an app with nothing to say is
+                # distinguishable from one that reported an empty answer.
+                **_reported(site_app),
             }
             for name, site_app in state.apps.items()
         },

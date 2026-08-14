@@ -20,10 +20,11 @@ from jinja2 import ChoiceLoader, PackageLoader
 
 from .config import app_config, installed_apps, load_host_config, require_env
 from .nav import Section, sections
-from .registry import PodpackState, SiteApp, install_apps
+from .registry import Health, PodpackState, SiteApp, install_apps
 from .urls import absolute_url, base_url, check_base_url
 
 __all__ = [
+    "Health",
     "Section",
     "SiteApp",
     "absolute_url",
@@ -47,6 +48,7 @@ def create_app(
     *,
     site_package: str | None = None,
     init: Callable[[Flask], None] | None = None,
+    admin: Callable[[], bool] | None = None,
     host_config: dict[str, Any] | None = None,
     config_path: str | Path | None = None,
     data_root: str | Path | None = None,
@@ -72,6 +74,13 @@ def create_app(
         def create_app():
             return podpack.create_app(site_package="holdenweb", init=_wire)
 
+    `admin` is a predicate answering "is this request an operator's?", and it
+    guards `/_status`, which reports the site's database identity, its paths
+    and its versions. podpack cannot answer that question itself: it has no
+    login, because login is the site's to wire. Left unset, nobody qualifies
+    and the endpoint reports nothing -- the safe default for a route that is
+    otherwise reachable by anyone who can reach the site.
+
     `host_config` and the various roots exist so that tests can build a site
     without a mounted filesystem. In production every one of them is left unset
     and the values come from the config file and the environment.
@@ -87,6 +96,7 @@ def create_app(
         app.config.update(config_overrides)
 
     app.extensions["podpack"] = PodpackState(
+        admin=admin,
         host_config=host_config,
         data_root=Path(data_root or os.environ.get("PODPACK_DATA_ROOT", DEFAULT_DATA_ROOT)),
         log_root=Path(log_root or os.environ.get("PODPACK_LOG_ROOT", DEFAULT_LOG_ROOT)),

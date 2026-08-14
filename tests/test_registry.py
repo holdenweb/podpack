@@ -632,3 +632,177 @@ def test_a_namespaced_table_name_is_not_warned_about(
     """The teeth on the one above: the fixture app's `widgets` starts with `widget`."""
     assert app.extensions["podpack"].table_owners["widgets"] == "widget"
     assert "widgets" not in caplog.text
+
+
+REPORTING_APP = '''
+from flask import Blueprint
+from podpack import Health, Section, SiteApp
+
+blueprint = Blueprint("reporter", __name__)
+
+
+@blueprint.route("/")
+def index() -> str:
+    return "hi"
+
+
+class Reporter(SiteApp):
+    def healthz(self):
+        return Health(ok=STATE["ok"], detail=STATE["detail"], fatal=STATE["fatal"])
+
+    def status(self):
+        return {"queue_depth": 3}
+
+
+STATE = {"ok": True, "detail": "", "fatal": False}
+site_app = Reporter(blueprint=blueprint, url_prefix="/reporter")
+'''
+
+BROKEN_REPORTER = '''
+from flask import Blueprint
+from podpack import SiteApp
+
+blueprint = Blueprint("broken", __name__)
+
+
+@blueprint.route("/")
+def index() -> str:
+    return "hi"
+
+
+class Broken(SiteApp):
+    def healthz(self):
+        raise RuntimeError("the check itself is broken")
+
+    def status(self):
+        raise RuntimeError("so is this one")
+
+
+site_app = Broken(blueprint=blueprint, url_prefix="/broken")
+'''
+
+
+def _reporting_site(site: SiteFactory, app_package, source: str, name: str) -> Flask:
+    app_package(name, source)
+    return site(host_config={"site": {"name": "x", "environment": "test", "apps": [name]}})
+
+
+def test_an_app_reports_its_own_health_and_status(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    app = _reporting_site(site, app_package, REPORTING_APP, "reporting_app")
+    client = app.test_client()
+
+    health = client.get("/healthz").get_json()
+    assert health["status"] == "ok"
+    assert health["apps"]["reporter"]["status"] == "ok"
+    # How long the check took, so a slow one is visible rather than mysterious.
+    assert isinstance(health["apps"]["reporter"]["ms"], (int, float))
+
+    status = client.get("/_status").get_json()
+    assert status["apps"]["reporter"]["reported"] == {"queue_depth": 3}
+
+
+def test_an_unhealthy_app_does_not_by_itself_fail_the_site(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """The site keeps serving its other features, and says what is wrong.
+
+    /healthz gates the whole stack through the container healthcheck, so the
+    default has to be report-not-fail.
+    """
+    app = _reporting_site(site, app_package, REPORTING_APP, "reporting_app")
+    import reporting_app
+
+    reporting_app.STATE.update(ok=False, detail="store unreachable")
+    response = app.test_client().get("/healthz")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["status"] == "ok"
+    assert body["apps"]["reporter"] == {
+        "status": "unhealthy", "ms": body["apps"]["reporter"]["ms"],
+        "detail": "store unreachable",
+    }
+
+
+def test_an_app_may_declare_its_own_failure_fatal(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    app = _reporting_site(site, app_package, REPORTING_APP, "reporting_app")
+    import reporting_app
+
+    reporting_app.STATE.update(ok=False, fatal=True)
+    response = app.test_client().get("/healthz")
+
+    assert response.status_code == 503
+    assert response.get_json()["status"] == "unhealthy"
+
+
+def test_a_raising_check_is_reported_not_propagated(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """A health check is the last thing that should be able to break a site."""
+    app = _reporting_site(site, app_package, BROKEN_REPORTER, "broken_app")
+    client = app.test_client()
+
+    health = client.get("/healthz")
+    assert health.status_code == 200
+    assert "the check itself is broken" in health.get_json()["apps"]["broken"]["detail"]
+
+    status = client.get("/_status")
+    assert status.status_code == 200
+    assert "so is this one" in status.get_json()["apps"]["broken"]["reported"]["error"]
+
+
+def test_an_app_that_reports_nothing_is_absent_rather_than_healthy(app: Flask) -> None:
+    """The fixture app overrides neither method: silence is not a clean bill."""
+    client = app.test_client()
+    assert "apps" not in client.get("/healthz").get_json()
+    assert "reported" not in client.get("/_status").get_json()["apps"]["widget"]
+
+
+def test_status_is_not_public(site: SiteFactory) -> None:
+    """It reports the database identity, every path, and the build commit.
+
+    404 rather than 403: whether this site is a podpack site at all is not
+    something an operator has a reason to publish.
+    """
+    app = site(admin=None)
+    assert app.test_client().get("/_status").status_code == 404
+
+
+def test_status_answers_an_operator(site: SiteFactory) -> None:
+    app = site(admin=lambda: True)
+    assert app.test_client().get("/_status").status_code == 200
+
+
+def test_a_guard_that_raises_denies(site: SiteFactory) -> None:
+    """A guard that fails open is not a guard."""
+    def broken() -> bool:
+        raise RuntimeError("the role table is unreachable")
+
+    app = site(admin=broken)
+    assert app.test_client().get("/_status").status_code == 404
+
+
+def test_healthz_stays_public_but_keeps_an_apps_words_back(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """The container healthcheck needs the status code and nothing else.
+
+    An app's detail names hosts and paths, so the public body says only
+    which app is unwell; the sentence is behind the guard.
+    """
+    app_package("reporting_app", REPORTING_APP)
+    config = {"site": {"name": "x", "environment": "test", "apps": ["reporting_app"]}}
+    import reporting_app
+
+    reporting_app.STATE.update(ok=False, detail="mongodb://box:27017 unreachable")
+
+    public = site(admin=None, host_config=config).test_client().get("/healthz")
+    assert public.status_code == 200
+    assert public.get_json()["apps"]["reporter"] == {"status": "unhealthy"}
+
+    operator = site(admin=lambda: True, host_config=config).test_client().get("/healthz")
+    assert "mongodb://box:27017" in operator.get_json()["apps"]["reporter"]["detail"]

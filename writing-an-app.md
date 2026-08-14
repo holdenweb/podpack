@@ -351,6 +351,46 @@ Without one there is no `links.static` endpoint and `url_for` raises
 explicit `static_url_path`, because `/static` already belongs to the Flask
 application and was registered first — see [§10](#10-the-finished-site_app).
 
+### Saying whether you are working
+
+Subclass `SiteApp` and override either method; both are optional and both
+default to reporting nothing.
+
+```python
+from podpack import Health, SiteApp
+
+class Links(SiteApp):
+    def healthz(self) -> Health:
+        try:
+            data_dir("links").stat()
+        except OSError as exc:
+            return Health(ok=False, detail=f"data directory: {exc}")
+        return Health(ok=True)
+
+    def status(self) -> dict:
+        return {"links": db.session.scalar(sa.select(sa.func.count(Link.id)))}
+```
+
+`healthz()` runs on every `/healthz`, which the container healthcheck hits
+every ten seconds — so keep it cheap, and remember it may be the thing
+standing between a deployment and a rollback. It may do I/O: pinging the
+store you depend on is the whole point, and podpack reports the elapsed
+milliseconds so a slow check shows up as slow rather than as a mystery.
+
+Three defaults worth knowing:
+
+- **Returning `None` means "not reported", not "healthy".** An app that
+  overrides nothing is simply absent from the report.
+- **A failure is reported, not fatal.** `/healthz` stays 200 and names you.
+  Pass `fatal=True` only if the site has no purpose while you are down —
+  it makes the container unhealthy, which is a decision about the *site*.
+- **An exception is caught** and reported as an unhealthy app.
+
+`status()` is the same shape for `/_status`, and the same caution applies as
+to anything that endpoint reports: it is an operator's view of mounts,
+grants and versions, so report what helps diagnose those rather than what
+your tables contain.
+
 ### CLI commands
 
 `@blueprint.cli.command("reindex")` gives you `flask links reindex` — the group
