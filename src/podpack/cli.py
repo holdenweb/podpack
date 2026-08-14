@@ -42,6 +42,19 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="podpack",
+        # argparse lists the group and stops, so the commands anybody
+        # actually types are invisible from the only place they will look
+        # first. Spelled out here rather than left one --help away.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "the substrate commands:\n"
+            "  podpack substrate init       lay it down, or adopt a hand-copied set\n"
+            "  podpack substrate status     how every file relates to this podpack\n"
+            "  podpack substrate upgrade    bring the copy forward after upgrading\n"
+            "  podpack substrate diff       what differs, file by file\n"
+            "  podpack substrate services   which backing services this site runs\n"
+            "\nany of them with --help for its own options."
+        ),
         description=(
             "podpack's command line, for the parts of a site that need no "
             "running application. Anything that does -- creating a user, "
