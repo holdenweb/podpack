@@ -16,9 +16,9 @@ apps = ["podpack_notes"]     # an app installed from its own repository
 
 podpack itself installs no app — a repository that installed one would be a
 site. For a running example see `~/sites/podpack-demo`, and
-[creating-a-site.md](creating-a-site.md) for how to build one. The other side of
+[creating-a-site.md](https://github.com/holdenweb/podpack/blob/main/creating-a-site.md) for how to build one. The other side of
 the contract — writing, running, testing and shipping an app — is
-[writing-an-app.md](writing-an-app.md).
+[writing-an-app.md](https://github.com/holdenweb/podpack/blob/main/writing-an-app.md).
 
 Adding an already-installed feature to a running site requires adding a line
 in that file and a restart — no code change, no rebuild, and no change to
@@ -35,7 +35,7 @@ tenant.
 
 This README says how to use podpack. For **why it is the way it is** — what
 forced each choice, what it cost, and what was rejected — see the
-[architectural decision records](adrs/README.md).
+[architectural decision records](https://github.com/holdenweb/podpack/blob/main/adrs/README.md).
 
 The container suite is arranged so that **no state and no host-specific setting
 lives inside a container**: persistent state is bind-mounted from
@@ -94,7 +94,7 @@ survives either way; see [Starting over](#starting-over).
 
 An app is a package exposing **one module-level `site_app`**. Everything else is
 convention. This section is the reference;
-[writing-an-app.md](writing-an-app.md) is the worked guide to building one.
+[writing-an-app.md](https://github.com/holdenweb/podpack/blob/main/writing-an-app.md) is the worked guide to building one.
 
 ```python
 # myapp/__init__.py
@@ -218,7 +218,7 @@ them look like apps is a natural first thought: `flask-mailman` and
 own, created inside `init_app`. A `SiteApp` is built around a blueprint, so a
 shim would mean inventing one — and then inheriting a template namespace, a data
 directory and a log directory that nothing uses. See
-[ADR-0025](adrs/0025-the-site-wires-its-own-extensions.md).
+[ADR-0025](https://github.com/holdenweb/podpack/blob/main/adrs/0025-the-site-wires-its-own-extensions.md).
 
 ### The app's name is its blueprint's name
 
@@ -415,7 +415,7 @@ installed, so migrations follow the app list.
 belongs in the repository. Autogenerate compares the models against a live
 database, so this is the one job that wants the database port — which the
 suite does not publish by default (see
-[ADR-0027](adrs/0027-the-database-port-is-published-only-on-request.md)).
+[ADR-0027](https://github.com/holdenweb/podpack/blob/main/adrs/0027-the-database-port-is-published-only-on-request.md)).
 Ask for it, for as long as it takes:
 
 ```bash
@@ -508,7 +508,7 @@ COMPOSE_FILE=compose.yaml:compose.postgres.yaml
 What is optional about PostgreSQL is the *container*, not the database: a
 site may drop `compose.postgres.yaml` from `COMPOSE_FILE` by hand and point
 the URI at a managed instance, which is the Opalstack arrangement
-[ADR-0015](adrs/0015-postgresql-stays-in-a-container.md) anticipated.
+[ADR-0015](https://github.com/holdenweb/podpack/blob/main/adrs/0015-postgresql-stays-in-a-container.md) anticipated.
 
 ```bash
 uv run podpack substrate services                 # what this site runs
@@ -549,7 +549,7 @@ like they are for: a service outside an enabled profile is not absent but
 project the moment the profile is off. Overlays merge `depends_on`
 additively, which is how the ordering guarantees survive being optional.
 Measured, and recorded in
-[ADR-0028](adrs/0028-core-services-are-overlays-the-site-chooses.md).
+[ADR-0028](https://github.com/holdenweb/podpack/blob/main/adrs/0028-core-services-are-overlays-the-site-chooses.md).
 
 ## The first administrator
 
@@ -621,7 +621,7 @@ Out of the command's reach, always: `config/app.toml`, `alembic/versions/`,
 did not put there — though the seeded `.gitignore` suggests `scratch/` for
 your own experiments and one-off utilities, so that `scripts/` can hold
 only the two files podpack manages. See
-[ADR-0026](adrs/0026-the-substrate-ships-in-the-package-and-upgrades-by-manifest.md)
+[ADR-0026](https://github.com/holdenweb/podpack/blob/main/adrs/0026-the-substrate-ships-in-the-package-and-upgrades-by-manifest.md)
 for the full rules and what was rejected.
 
 This repository's own root is a rendered instance of the packaged substrate
@@ -656,7 +656,7 @@ POSTGRES_HOST_PORT=5439 podman compose --profile dbport up -d dbport
 A shell variable beats `.env`, so the second form chooses a number for one
 use without editing a committed file. `podman compose --profile dbport rm -sf
 dbport` takes it away again. See
-[ADR-0027](adrs/0027-the-database-port-is-published-only-on-request.md).
+[ADR-0027](https://github.com/holdenweb/podpack/blob/main/adrs/0027-the-database-port-is-published-only-on-request.md).
 
 ## Where everything lives
 
@@ -858,7 +858,7 @@ used exactly once, by the bootstrap below, and are never given to the app.
 
 ## First-run bootstrap
 
-[`db-init/01-create-app-user.sh`](db-init/01-create-app-user.sh) creates the
+[`db-init/01-create-app-user.sh`](https://github.com/holdenweb/podpack/blob/main/db-init/01-create-app-user.sh) creates the
 least-privileged application role. It:
 
 - creates the `holdenweb_app` login role and grants it `CONNECT`,
@@ -906,7 +906,7 @@ The database healthcheck is `pg_isready -U … -d …` rather than a bare
 accepting connections before the bootstrap has finished creating the
 application's database, and everything downstream starts too early.
 
-The web healthcheck runs [`container/healthcheck.py`](container/healthcheck.py)
+The web healthcheck runs [`container/healthcheck.py`](https://github.com/holdenweb/podpack/blob/main/container/healthcheck.py)
 as a **script file**, not a `python -c` one-liner: podman splits `["CMD", ...]`
 healthcheck arguments on whitespace, so an inline probe arrives mangled and dies
 with a SyntaxError — reporting the container unhealthy however well it is
@@ -914,7 +914,7 @@ actually running.
 
 ## The image
 
-[`Containerfile`](Containerfile) builds in **two stages**, because three things
+[`Containerfile`](https://github.com/holdenweb/podpack/blob/main/Containerfile) builds in **two stages**, because three things
 are needed to build the virtual environment and none of them to run it:
 
 | Left behind in the builder | Why it is there | Weight |
@@ -1013,7 +1013,7 @@ belongs to version control rather than to the machine.
 Two differences on a real Linux host:
 
 - **SELinux (RHEL, Fedora, CentOS Stream).** Append `,Z` to the read-write bind
-  mounts and `,z` to the read-only ones in [compose.yaml](compose.yaml) — e.g.
+  mounts and `,z` to the read-only ones in [compose.yaml](https://github.com/holdenweb/podpack/blob/main/compose.yaml) — e.g.
   `${HOST_DATA_DIR}/postgres:/var/lib/postgresql/data:Z`. Without a label,
   SELinux denies the container access. The mount points are commented in the
   file.

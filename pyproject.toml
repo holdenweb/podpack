@@ -1,11 +1,25 @@
 [project]
 name = "podpack"
-version = "0.4.0a1"
+version = "0.4.0"
 description = "A framework for building and running web sites out of pluggable apps"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENCE"]
 requires-python = ">=3.12"
+keywords = ["flask", "plugins", "web", "containers", "podman"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: Flask",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
 dependencies = [
     # Deliberately the same stack the real holdenweb package uses, so that what
     # works here has a fair chance of working there.
@@ -15,6 +29,18 @@ dependencies = [
     "alembic>=1.13",
     "gunicorn>=22.0",
 ]
+
+# The driver for an optional core service, installed only by a site that runs
+# one: `podpack[mongodb]`. The catalogue names this extra, so it has to exist.
+[project.optional-dependencies]
+mongodb = ["pymongo>=4.8"]
+
+# PyPI's sidebar is a project's only signposting for anyone who arrives
+# there rather than at the repository.
+[project.urls]
+Homepage = "https://github.com/holdenweb/podpack"
+Repository = "https://github.com/holdenweb/podpack"
+Issues = "https://github.com/holdenweb/podpack/issues"
 
 [[project.authors]]
 name = "Steve Holden"

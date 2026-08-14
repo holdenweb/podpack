@@ -877,3 +877,33 @@ def test_no_manifest_entry_reaches_outside_the_site(tmp_path: Path) -> None:
         target = Path(entry.target)
         assert not target.is_absolute()
         assert ".." not in target.parts
+
+
+def test_every_manifest_source_ships_in_a_built_wheel(tmp_path: Path) -> None:
+    """The wheel, not the editable install this suite otherwise resolves.
+
+    `test_every_manifest_source_ships_with_the_package` reads through
+    `source_root()`, which in a development checkout is the source tree --
+    so it would pass with the whole substrate excluded from packaging, and
+    the failure would first appear to somebody who had installed podpack
+    from an index. Building is slow enough to skip when the tools are not
+    there, and cheap enough to be worth it when they are.
+    """
+    import subprocess
+    import zipfile
+
+    build = subprocess.run(
+        ["uv", "build", "--wheel", "--quiet", "--out-dir", str(tmp_path)],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    if build.returncode != 0:
+        pytest.skip(f"uv build unavailable: {build.stderr.strip()[:80]}")
+
+    wheels = list(tmp_path.glob("*.whl"))
+    assert wheels, "uv build produced no wheel"
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        shipped = set(wheel.namelist())
+
+    for entry in MANIFEST:
+        assert f"podpack/substrate/data/{entry.source}" in shipped, entry.source
+    assert "podpack/py.typed" in shipped
