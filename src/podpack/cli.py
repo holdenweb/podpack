@@ -1,10 +1,16 @@
 """The podpack command line.
 
 One console script with room for future subcommands; today it carries
-`substrate`, the install-and-upgrade command for the container substrate
-(ADR-0026). argparse rather than a CLI framework: four subcommands and a
-dozen flags is inside stdlib territory, and podpack takes no dependency it
-can do without.
+`substrate`, which installs and upgrades a site's copy of the container
+substrate (ADR-0026) and says which backing services it runs (ADR-0028).
+
+argparse rather than a CLI framework: five subcommands and a dozen flags is
+inside stdlib territory, and podpack takes no dependency it can do without.
+Note the deliberate split -- anything needing a *running site* is a Flask
+CLI command instead, where `--app` already solves finding the application.
+That is why creating a user is not here: it needs the site's models, its
+database and its password hashing, and flask-security's own `users create`
+and `roles add` do it well already.
 """
 
 from __future__ import annotations
@@ -49,10 +55,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="install and upgrade a site's copy of the container substrate",
         description=(
             "The substrate ships inside the podpack package; these commands "
-            "keep a site's copy current. Managed files sync three-way and "
-            "never clobber a site edit; configuration files only ever gain "
-            "new parameters; config/app.toml, alembic/versions/ and the "
-            "site's own scripts are never touched. State lives in "
+            "keep a site's copy current, and say which backing services it "
+            "runs. Managed files sync three-way and never clobber a site "
+            "edit; configuration files only ever gain new parameters; "
+            "config/app.toml, alembic/versions/, secrets.env and the site's "
+            "own scripts are never written. State lives in "
             f"{substrate.STATE_FILE}, which the site commits."
         ),
     )
@@ -63,10 +70,18 @@ def _build_parser() -> argparse.ArgumentParser:
     init.add_argument("--site-package", help="the site's import name; default: derived from pyproject.toml")
     init.add_argument("--site-name", help="compose project/image name; default: site package, dashed")
     init.add_argument("--web-port", type=int, default=None, help="host port for the web service (default 8458)")
-    init.add_argument("--db-port", type=int, default=None, help="host port for PostgreSQL (default 5433)")
-    init.add_argument("--db-name", default=None, help="database name (default: site package)")
-    init.add_argument("--db-user", default=None, help="application role (default: <site package>_app)")
-    init.add_argument("--db-password", default=None, help="lab password for the application role")
+    init.add_argument("--db-port", type=int, default=None,
+                      help="default host port for the postgres forwarder, which "
+                           "publishes nothing until asked for (default 5433)")
+    init.add_argument("--db-name", default=None,
+                      help="database name, for every service this site runs "
+                           "(default: site package)")
+    init.add_argument("--db-user", default=None,
+                      help="the application's own role, in every service "
+                           "(default: <site package>_app)")
+    init.add_argument("--db-password", default=None,
+                      help="lab password for that role; the real one is yours to "
+                           "put in secrets.env, which podpack never writes")
     init.add_argument("--services", default=None,
                       help="comma-separated OPTIONAL services this site also runs "
                            f"(available: {','.join(substrate.services.optional_names())}). "
@@ -75,7 +90,7 @@ def _build_parser() -> argparse.ArgumentParser:
     init.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
 
     upgrade = actions.add_parser("upgrade", help="bring the substrate up to the installed podpack")
-    upgrade.add_argument("--dir", default=".")
+    upgrade.add_argument("--dir", default=".", help="site directory (default: .)")
     upgrade.add_argument("--dry-run", action="store_true", help="report without writing")
     upgrade.add_argument("--take-upstream", action="append", default=[], metavar="PATH",
                          help="take podpack's version of PATH, whether it conflicts "
@@ -85,7 +100,7 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="resolve a conflict by keeping the site's PATH as-is")
 
     stat = actions.add_parser("status", help="report every substrate file's state")
-    stat.add_argument("--dir", default=".")
+    stat.add_argument("--dir", default=".", help="site directory (default: .)")
     stat.add_argument("--check", action="store_true",
                       help="exit 1 if an upgrade would write or conflict")
 
@@ -101,14 +116,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "nothing podpack owns will have destroyed anything."
         ),
     )
-    svc.add_argument("--dir", default=".")
+    svc.add_argument("--dir", default=".", help="site directory (default: .)")
     svc.add_argument("--add", metavar="NAME", action="append", default=[],
                      help="enable an optional service for this site "
                           f"({','.join(substrate.services.optional_names())})")
     svc.add_argument("--dry-run", action="store_true", help="report without writing")
 
     diff = actions.add_parser("diff", help="diff substrate files against the installed version")
-    diff.add_argument("--dir", default=".")
+    diff.add_argument("--dir", default=".", help="site directory (default: .)")
     diff.add_argument("paths", nargs="*", help="targets to diff (default: all that differ)")
 
     return parser
