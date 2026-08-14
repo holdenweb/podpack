@@ -78,6 +78,11 @@ BASE_MANIFEST: tuple[SubstrateFile, ...] = (
     SubstrateFile("dockerignore", ".dockerignore", VERBATIM),
     SubstrateFile("container/healthcheck.py", "container/healthcheck.py", VERBATIM),
     SubstrateFile("scripts/up.sh", "scripts/up.sh", VERBATIM, executable=True),
+    # The container-free path: the same site, the same config and the same
+    # migration history, run without podman. RENDERED because it names the
+    # site's package for `flask --app`.
+    SubstrateFile("scripts/dev.sh", "scripts/dev.sh", RENDERED, executable=True),
+    SubstrateFile("dev.env.example", "dev.env.example", CONFIG),
     SubstrateFile(
         "scripts/prepare-host-dirs.sh",
         "scripts/prepare-host-dirs.sh",
@@ -714,6 +719,29 @@ def plan_upgrade(
                 # Baseline stays put: the conflict is unresolved.
                 record["sha256"] = baseline
             state.files[entry.target] = record
+
+        elif record is None:
+            # A CONFIG or SEEDED file this podpack has added since the site
+            # was built. "Seeded once" means once per site, not once ever:
+            # with no record, podpack has never delivered this file here, so
+            # its absence is not the site having removed it. Without this a
+            # new seed reaches new sites only, which is the gap the seeded
+            # class is already awkward about -- and it would have arrived
+            # silently, since nothing reports a file that was never offered.
+            content = (
+                config_canon(entry.target, params, root)
+                if entry.kind == CONFIG else rendered
+            )
+            actions.append(Action(entry.target, "write", content=content,
+                                  executable=entry.executable))
+            state.files[entry.target] = {
+                "class": entry.kind, "sha256": sha256(content),
+                "seeded_by": new_version,
+            }
+            if entry.kind == CONFIG:
+                state.delivered_vars[entry.target] = sorted(
+                    env_var_names(content.decode("utf-8"))
+                )
 
         elif entry.kind == CONFIG:
             actions.extend(_plan_var_delivery(

@@ -8,6 +8,13 @@ secrets.env
 hostdata/
 hostlogs/
 
+# The local, container-free run: its environment (a real secret, even if a
+# throwaway one) and the roots it writes app data and logs to. Kept apart
+# from hostdata/ because those belong to the uid the containers drop to.
+dev.env
+devdata/
+devlogs/
+
 # Python.
 .venv/
 __pycache__/

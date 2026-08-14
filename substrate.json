@@ -22,6 +22,14 @@
       "WEB_BIND_ADDR",
       "WEB_HOST_PORT"
     ],
+    "dev.env.example": [
+      "FLASK_RUN_PORT",
+      "PODPACK_CONFIG",
+      "PODPACK_DATA_ROOT",
+      "PODPACK_LOG_ROOT",
+      "SECRET_KEY",
+      "SQLALCHEMY_DATABASE_URI"
+    ],
     "secrets.env.example": [
       "POSTGRES_APP_PASSWORD",
       "POSTGRES_APP_USER",
@@ -109,9 +117,18 @@
       "class": "verbatim",
       "sha256": "44202d372549fd421a3e141ed7d75c7d55175e7252cc7da935bc5e3af803bdf1"
     },
+    "dev.env.example": {
+      "class": "config",
+      "seeded_by": "0.4.0",
+      "sha256": "aa23cfba5bbdf71e747374950ee73df1626282f239ba769c324ccf547d2d4448"
+    },
     "mongodb-init/01-create-app-user.sh": {
       "class": "verbatim",
       "sha256": "a77c518c03c7741773eb2f7edefb62aa1570459dcb3a3f52f687c7485ff666cc"
+    },
+    "scripts/dev.sh": {
+      "class": "rendered",
+      "sha256": "95210aba142a47ca8e29574d8464999d6c173a8af2419e7a69366d313eee2d85"
     },
     "scripts/prepare-host-dirs.sh": {
       "class": "verbatim",
@@ -135,6 +152,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.3.0",
+  "podpack_version": "0.4.0",
   "substrate_schema": 1
 }

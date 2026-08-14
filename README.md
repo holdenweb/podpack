@@ -490,6 +490,46 @@ alembic check     # should report no new upgrade operations
 
 # The container substrate
 
+## Two ways to run a site
+
+The same site, the same `config/app.toml`, the same app list and the same
+alembic history — run two ways:
+
+```bash
+./scripts/up.sh     # containers: podman compose, gunicorn, the real shape
+./scripts/dev.sh    # local: no containers at all, Flask's dev server
+```
+
+`dev.sh` reads `dev.env` (made from `dev.env.example` on first run, and
+gitignored), applies the migration history, and starts the development
+server. It expects **a natively installed PostgreSQL** — not SQLite, and
+that is the one place this costs you a setup step:
+
+```bash
+createuser --pwprompt mysite_app
+createdb --owner mysite_app mysite
+```
+
+podpack will not run those for you. The server is yours, and a run script
+that issued DDL against it would be doing something you had not asked for —
+so `dev.sh` checks, and prints exactly those two lines when it cannot
+connect.
+
+**Why not SQLite, when it needs no setup at all?** Because
+`alembic revision --autogenerate` run against SQLite produces revisions
+PostgreSQL may reject. This project has the scar: a baseline written that
+way used `ALTER COLUMN`, which is PostgreSQL-only syntax and fatal on
+SQLite, and the mismatch surfaced only when a fresh container database was
+built months later. Authoring against the engine you deploy on is the whole
+point of authoring on the host
+([ADR-0011](https://github.com/holdenweb/podpack/blob/main/adrs/0011-revisions-authored-on-the-host.md)).
+SQLite remains right for *tests*, which create their schema directly and
+author nothing.
+
+What the local mode does not give you: gunicorn, a proxy, the image, and any
+backing service beyond the PostgreSQL you installed — so a site running
+mongodb has none locally unless it installs one, and `dev.sh` says so.
+
 ## Core services
 
 A site chooses its backing stores. `compose.yaml` is the base — the site, its
