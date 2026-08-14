@@ -42,7 +42,11 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="podpack",
-        description="The podpack framework's command line.",
+        description=(
+            "podpack's command line, for the parts of a site that need no "
+            "running application. Anything that does -- creating a user, "
+            "say -- is a Flask command instead: `flask --app <site> --help`."
+        ),
     )
     parser.add_argument(
         "--version", action="version",
@@ -52,7 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub = commands.add_parser(
         "substrate",
-        help="install and upgrade a site's copy of the container substrate",
+        help="install, upgrade and inspect a site's substrate and its services",
         description=(
             "The substrate ships inside the podpack package; these commands "
             "keep a site's copy current, and say which backing services it "
