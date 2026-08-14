@@ -20,6 +20,14 @@
 hostdata/
 hostlogs/
 
+# The container-free local run's environment and its data and log roots. The
+# Containerfile copies named paths, so none of this could reach the image --
+# but dev.env holds a real database password, and there is no reason to hand
+# it to the build daemon to find out.
+dev.env
+devdata/
+devlogs/
+
 # The site's own experiments and one-off utilities. Nothing reaches the image
 # either way -- the Containerfile copies named paths rather than `.` -- but a
 # scratch directory is where a database dump or a big sample file lands, and
@@ -45,7 +53,16 @@ scratch/
 dist/
 **/*.egg-info
 
-# Editor and local tooling.
-*.wpr
-*.wpu
-.DS_Store
+# Editor and local tooling. `**/` for the same reason as __pycache__ above, and
+# this file had the bug it warns about: a root-anchored `.DS_Store` let
+# `src/.DS_Store` through `COPY src/`, and it was measured sitting in a built
+# image. Finder writes one into any directory somebody has opened.
+**/.DS_Store
+**/*.wpr
+**/*.wpu
+
+# Wing IDE's debugger stub, which the IDE drops into the source directory it is
+# debugging. Untracked, so a site's .gitignore hides it -- but the build context
+# is the working tree, not the index, so `COPY src/` shipped a debugger into a
+# production image. Nothing imports it there; it has no business in one anyway.
+**/wingdbstub.py
