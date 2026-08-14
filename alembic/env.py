@@ -15,17 +15,21 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from podpack.migrations import target_metadata as _target_metadata
+from podpack.migrations import (
+    refuse_foreign_autogenerate,
+    target_metadata as _target_metadata,
+)
 
-# A site that keeps its environment in a .env file gets it loaded here too,
-# so host-side alembic runs see the same variables the site does. Guarded:
-# python-dotenv is the site's dependency if it is anyone's, not podpack's.
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
+# Deliberately no load_dotenv(). It was here, and it was a trap: `.env` is
+# *compose's* file -- ports, host paths, COMPOSE_FILE -- and a site that
+# predates that split may still have a production SQLALCHEMY_DATABASE_URI in
+# it. Loading it turned "no database configured", which stops safely, into a
+# silent connection to whatever `.env` happened to name. Measured on
+# holdenweb.com, where a bare `alembic upgrade head` reached the live
+# database with nothing exported at all.
+#
+# The environment comes from where it is meant to: `scripts/dev.sh` sources
+# dev.env for a local run, and compose supplies env_file in a container.
 
 config = context.config
 
@@ -50,6 +54,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        process_revision_directives=refuse_foreign_autogenerate,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -62,7 +67,13 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            # Authoring on the engine you deploy on is the whole point of
+            # authoring on the host (ADR-0011); this is what makes it true.
+            process_revision_directives=refuse_foreign_autogenerate,
+        )
         with context.begin_transaction():
             context.run_migrations()
 
