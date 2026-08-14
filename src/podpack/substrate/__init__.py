@@ -54,6 +54,7 @@ FRAGMENT = "fragment"    # joins a CONFIG file's canon when its service is on
 # mongodb receive exactly those, by the ordinary append rule.
 
 _TOKEN_RE = re.compile(r"@@[A-Z_]+@@")
+_TOKEN_RE_BYTES = re.compile(rb"@@[A-Z_]+@@")
 _VAR_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=")
 
 
@@ -732,6 +733,13 @@ def plan_upgrade(
                 config_canon(entry.target, params, root)
                 if entry.kind == CONFIG else rendered
             )
+            # Marked, not left raw. An upgrade renders from what
+            # substrate.json recorded, and the password deliberately is not
+            # recorded -- so a file delivered this way can carry a token that
+            # init would have filled. Delivery of individual variables
+            # already does this; a whole file arriving late needs it too, or
+            # the site finds `@@DB_PASSWORD@@` in a connection string.
+            content = _TOKEN_RE_BYTES.sub(b"CHANGEME", content)
             actions.append(Action(entry.target, "write", content=content,
                                   executable=entry.executable))
             state.files[entry.target] = {

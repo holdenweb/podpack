@@ -120,7 +120,7 @@
     "dev.env.example": {
       "class": "config",
       "seeded_by": "0.4.0",
-      "sha256": "aa23cfba5bbdf71e747374950ee73df1626282f239ba769c324ccf547d2d4448"
+      "sha256": "12d0d1377075f55c62c1d9353814037cc4718c2b06818c762938b20e6ca6ba0d"
     },
     "mongodb-init/01-create-app-user.sh": {
       "class": "verbatim",
