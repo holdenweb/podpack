@@ -22,3 +22,11 @@ scratch/
 # gets. This file is the same thing, one generation older.
 dev.db
 src/instance/
+
+# The local, container-free run: its environment holds a real password, even
+# if a throwaway one, and its roots hold app data written by your own uid.
+# In the seeded .gitignore new sites get; added here by hand because a
+# seeded file is never revisited (ADR-0026).
+dev.env
+devdata/
+devlogs/
