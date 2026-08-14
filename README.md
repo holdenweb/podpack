@@ -551,6 +551,28 @@ additively, which is how the ordering guarantees survive being optional.
 Measured, and recorded in
 [ADR-0028](adrs/0028-core-services-are-overlays-the-site-chooses.md).
 
+## The first administrator
+
+`/_status` answers a member of the `admin` role and nobody else, and a fresh
+database has neither the role nor a user — so a new site's operator view is
+unreachable until three commands have been run. They are flask-security's
+own, not podpack's:
+
+```bash
+flask --app mysite users create you@example.com --active
+flask --app mysite roles create admin
+flask --app mysite roles add you@example.com admin
+```
+
+The password is prompted for, hidden and confirmed. **`--active` matters**:
+without it the account is created and cannot sign in, which looks exactly
+like a wrong password.
+
+podpack contributes the name and nothing else — `podpack.ADMIN_ROLE`, so a
+site and its guard agree on one spelling. It ships no command of its own
+here, because these three exist and validate the identity through the
+registration form; a framework version would have been a worse copy.
+
 ## Getting it, and keeping it current
 
 The substrate ships inside the podpack package, and a site installs it with

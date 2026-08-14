@@ -204,7 +204,41 @@ INFO  [alembic.runtime.migration] Running upgrade  -> <id>, installed app schema
 **Always autogenerate with your full app list enabled** — with one disabled,
 alembic will faithfully propose dropping its tables.
 
-### 8. Look at it
+### 8. Make yourself an administrator
+
+`/_status` reports the database identity and every host path, so it answers
+only a member of the `admin` role — which a fresh database does not have:
+
+```bash
+flask --app mysite users create you@example.com --active
+flask --app mysite roles create admin
+flask --app mysite roles add you@example.com admin
+```
+
+These are flask-security's commands, and `--active` is the one to remember:
+without it the account exists and cannot sign in.
+
+Your site tells podpack who qualifies, because podpack has no login of its
+own — pass a predicate to the factory:
+
+```python
+from flask_security import current_user
+import podpack
+
+def create_app():
+    return podpack.create_app(
+        site_package="mysite",
+        init=_wire,
+        admin=lambda: current_user.is_authenticated
+                      and current_user.has_role(podpack.ADMIN_ROLE),
+    )
+```
+
+Leave `admin` unset and nobody qualifies: `/_status` answers 404 for
+everyone, which is the right default for a route that would otherwise
+publish your database identity to anyone who can reach the site.
+
+### 9. Look at it
 
 ```bash
 uv run flask --app mysite run -p 5001

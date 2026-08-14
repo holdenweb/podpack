@@ -21,7 +21,6 @@ from jinja2 import ChoiceLoader, PackageLoader
 from .config import app_config, installed_apps, load_host_config, require_env
 from .nav import Section, sections
 from .registry import Health, PodpackState, SiteApp, install_apps
-from .users import ADMIN_ROLE
 from .urls import absolute_url, base_url, check_base_url
 
 __all__ = [
@@ -40,6 +39,21 @@ __all__ = [
 # Created unbound and attached to an app inside create_app(), so that several
 # app instances -- one per test, say -- can coexist safely.
 db = SQLAlchemy()
+
+ADMIN_ROLE = "admin"
+"""The role a site's `admin` predicate should ask about.
+
+A name and nothing else. podpack ships no command to create it and no model
+to hold it: flask-security already has `users create`, `roles create` and
+`roles add`, and its versions validate the identity through the registration
+form and resolve users the way the rest of it does. A framework command
+would have been a worse copy of three that exist -- so what podpack
+contributes here is one spelling, so that a site and its guard agree.
+
+    flask --app <site> users create you@example.com --active
+    flask --app <site> roles create admin
+    flask --app <site> roles add you@example.com admin
+"""
 
 DEFAULT_DATA_ROOT = "/var/lib/holdenweb/apps"
 DEFAULT_LOG_ROOT = "/var/log/holdenweb/apps"
@@ -108,12 +122,8 @@ def create_app(
     _add_template_fallback(app)
 
     from .core import core_blueprint, install_home_page
-    from .users import register as register_user_commands
 
     app.register_blueprint(core_blueprint)
-    # Registered before the site's own init, so a site may add commands of
-    # its own to the same group or override one outright.
-    register_user_commands(app)
 
     # The site's own wiring runs before its apps, so an app's `init` can rely on
     # a service the site registered -- an app that sends mail should not have to
