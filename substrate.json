@@ -43,7 +43,7 @@
   "files": {
     ".dockerignore": {
       "class": "verbatim",
-      "sha256": "3baa54f8b01619d34a146e46afb10878454a0bf1c24d88478760e09c6ad1b42b"
+      "sha256": "a65fa6acfdcc26db5de97b7ba3fde2048a7b11cc291b72966e499d14b95c5e57"
     },
     ".env.example": {
       "class": "config",
@@ -152,6 +152,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.4.0",
+  "podpack_version": "0.4.3",
   "substrate_schema": 1
 }
