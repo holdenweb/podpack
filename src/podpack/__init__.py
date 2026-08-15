@@ -9,6 +9,7 @@ adding a feature to a running site is an edit to that file and a restart -- no
 code change, no rebuild, and no change to the compose file.
 """
 
+import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -35,6 +36,8 @@ __all__ = [
     "db",
     "sections",
 ]
+
+logger = logging.getLogger(__name__)
 
 # Created unbound and attached to an app inside create_app(), so that several
 # app instances -- one per test, say -- can coexist safely.
@@ -144,7 +147,66 @@ def create_app(
         it."""
         return {"sections": app.extensions["podpack"].nav, "site": host_config["site"]}
 
+    _report_unreachable_status(app)
+
     return app
+
+
+def _report_unreachable_status(app: Flask) -> None:
+    """Say at boot when nobody can read `/_status`, because nothing else will.
+
+    The endpoint refuses with 404 rather than 403 on purpose: that a site is a
+    podpack site at all is not worth publishing. The cost is that a refusal and
+    a route that does not exist look identical from outside, so an operator
+    locked out by configuration has nothing to read. That happened -- a site
+    with the predicate correctly wired, but with the `admin` role never created,
+    answered 404 to every request including its owner's, and the only way to
+    find out why was to query the database by hand.
+
+    A warning, not an error. A site with no operator is perfectly legitimate --
+    the container lab is one, and podpack has no login of its own to give it
+    (ADR-0025) -- so this reports a fact and starts the site regardless.
+    """
+    if app.extensions["podpack"].admin is None:
+        logger.warning(
+            "no `admin` predicate: /_status will answer 404 to everyone. That is "
+            "the safe default for a route reporting the database identity and "
+            "every host path; pass create_app(admin=...) to name this site's "
+            "operators."
+        )
+        return
+
+    # podpack owns no role model and no user table -- the whole point of
+    # ADR-0025 -- so there is nothing here it can query directly. What it can do
+    # is ask the extension the site wired, if it wired that one. A site whose
+    # predicate asks about something else entirely gets no warning, which is the
+    # right way round: a false alarm about a role you deliberately do not use
+    # would be worse than silence.
+    security = app.extensions.get("security")
+    datastore = getattr(security, "datastore", None)
+    if datastore is None:
+        return
+    try:
+        with app.app_context():
+            missing = datastore.find_role(ADMIN_ROLE) is None
+    except Exception as exc:  # noqa: BLE001 -- a diagnostic must not break a boot
+        # Reached whenever the tables are not there yet, which is ordinary: the
+        # `migrate` service creates them, and `create_app` runs in tests against
+        # databases that have none. Not worth a warning; the real one is below.
+        logger.debug("could not check for the %r role: %s", ADMIN_ROLE, exc)
+        return
+    if missing:
+        logger.warning(
+            "no %r role exists, so /_status will answer 404 to everyone -- "
+            "including you. Create it and grant it:\n"
+            "    flask --app %s roles create %s\n"
+            "    flask --app %s roles add <email> %s",
+            ADMIN_ROLE,
+            app.import_name,
+            ADMIN_ROLE,
+            app.import_name,
+            ADMIN_ROLE,
+        )
 
 
 def _configure(app: Flask, host_config: dict[str, Any]) -> None:

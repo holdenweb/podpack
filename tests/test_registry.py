@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -784,6 +785,86 @@ def test_a_guard_that_raises_denies(site: SiteFactory) -> None:
 
     app = site(admin=broken)
     assert app.test_client().get("/_status").status_code == 404
+
+
+def _wire_security(datastore: object) -> Callable[[Flask], None]:
+    """A site's `init` doing what flask-security's does: leaving its extension.
+
+    Stubbed rather than installed, because flask-security is a *site's*
+    dependency and not podpack's (ADR-0025) -- so these tests must not need it
+    present, which is also what proves the check is optional at runtime.
+    """
+    def _init(app: Flask) -> None:
+        app.extensions["security"] = SimpleNamespace(datastore=datastore)
+
+    return _init
+
+
+def test_a_site_with_no_operator_says_so_at_boot(
+    site: SiteFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    """404 makes a refusal and a missing route indistinguishable from outside.
+
+    So the reason has to reach the log, or it reaches nobody.
+    """
+    with caplog.at_level(logging.WARNING, logger="podpack"):
+        site(admin=None)
+    assert "/_status will answer 404 to everyone" in caplog.text
+
+
+def test_a_missing_admin_role_says_so_at_boot(
+    site: SiteFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The case that actually happened: predicate wired, role never created.
+
+    The site answered 404 to its own owner, and the only way to find out why
+    was to query the database by hand.
+    """
+    datastore = SimpleNamespace(find_role=lambda name: None)
+    with caplog.at_level(logging.WARNING, logger="podpack"):
+        site(admin=lambda: True, init=_wire_security(datastore))
+    assert "no 'admin' role exists" in caplog.text
+    assert "roles create admin" in caplog.text
+    assert "roles add <email> admin" in caplog.text
+
+
+def test_an_existing_admin_role_is_silent(
+    site: SiteFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    datastore = SimpleNamespace(find_role=lambda name: object())
+    with caplog.at_level(logging.WARNING, logger="podpack"):
+        site(admin=lambda: True, init=_wire_security(datastore))
+    assert "admin" not in caplog.text
+
+
+def test_a_site_that_wires_no_security_extension_is_silent(
+    site: SiteFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    """podpack owns no role model, so it has nothing of its own to consult.
+
+    A site whose predicate asks about something else entirely gets no warning:
+    a false alarm about a role you deliberately do not use is worse than
+    silence.
+    """
+    with caplog.at_level(logging.WARNING, logger="podpack"):
+        site(admin=lambda: True)
+    assert "role" not in caplog.text
+
+
+def test_an_unreadable_role_table_does_not_break_the_boot(
+    site: SiteFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ordinary rather than exceptional: `migrate` creates those tables, and a
+    site boots against a database that has none often enough -- in tests, and
+    in the window before the first migration runs. A diagnostic that could stop
+    a site starting would be a poor trade for the thing it diagnoses."""
+    def explode(name: str) -> object:
+        raise RuntimeError("relation \"role\" does not exist")
+
+    with caplog.at_level(logging.WARNING, logger="podpack"):
+        app = site(admin=lambda: True, init=_wire_security(SimpleNamespace(find_role=explode)))
+    assert caplog.text == ""
+    assert app.test_client().get("/_status").status_code == 200
 
 
 def test_healthz_stays_public_but_keeps_an_apps_words_back(

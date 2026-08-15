@@ -55,10 +55,31 @@ The first creates `.env` and `secrets.env` from their examples, with working lab
 values, and makes the host directories. The second always rebuilds — see
 [Changing things](#changing-things) for why that is the safe default.
 
-Then visit <http://localhost:8458/>, or ask the site where it keeps its state:
+Then visit <http://localhost:8458/>, or check the endpoint the container
+healthcheck uses:
 
 ```bash
-curl -s localhost:8458/_status | python3 -m json.tool
+curl -s localhost:8458/healthz
+```
+
+The richer view is `/_status`, and **the lab cannot show it to you**:
+
+```bash
+curl -s localhost:8458/_status     # 404, and that is correct
+```
+
+It answers operators only, an operator is whoever the *site's* `admin`
+predicate says, and the lab's site is podpack itself — which has no login to
+supply one (ADR-0025). So the lab's `/_status` is 404 for everybody,
+permanently. It becomes reachable on a site that wires a login and grants
+somebody the role; see [The first administrator](#the-first-administrator).
+
+The 404 is deliberate — whether a site is a podpack site at all is not worth
+publishing — but it makes a refusal and a missing route look identical, so
+podpack logs the reason at boot:
+
+```
+WARNING podpack: no `admin` predicate: /_status will answer 404 to everyone.
 ```
 
 That route reports the config file it read, the commit the image was built from,
@@ -809,12 +830,17 @@ be applied without even a restart. Anything under `src/`, `alembic/` or the
 
 ### Which commit is actually running
 
-`scripts/up.sh` stamps the commit into the image, and `/_status` reports it:
+`scripts/up.sh` stamps the commit into the image. Read it from the container,
+which works on any site including this lab:
 
 ```console
-$ curl -s localhost:8458/_status | python3 -c 'import json,sys; print(json.load(sys.stdin)["build_commit"])'
+$ podman compose exec web printenv PODPACK_BUILD_COMMIT
 a7cf297-dirty
 ```
+
+`/_status` reports the same value under `build_commit`, on a site whose
+`admin` predicate answers for you — not on the lab, which has no login and so
+no operator.
 
 Compare it with `git rev-parse --short HEAD` and the question "is the container
 running the code I am looking at?" has an exact answer rather than an inference
