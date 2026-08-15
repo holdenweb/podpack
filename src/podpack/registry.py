@@ -89,6 +89,30 @@ class SiteApp:
     the app needs. The site's own config is already loaded by this point, so an
     app can read its section of the host config file here."""
 
+    owns_tables: frozenset[str] = frozenset()
+    """Table names this app claims deliberately, whatever they are called.
+
+    `db.metadata` is the one namespace podpack does not divide by app name, so
+    an app whose tables its own name does not prefix is warned about: the next
+    app to claim `user` stops a site booting, and the warning reaches the author
+    who can still do something about it. Some names are not the app's to choose
+    -- flask-security's models derive `user` and `role`, and its documentation,
+    its datastore and its own join table all assume them -- so declaring them
+    here says "these are mine on purpose" and the warning stops.
+
+    It is not merely a mute. A declared name is *recorded* ownership: it reaches
+    `table_owners`, so `/_status` reports which app answers for the table, and a
+    later clash can name the incumbent instead of shrugging. That matters most
+    for a table podpack cannot otherwise see at all -- `roles_users` is built
+    inside flask-security rather than in the site's own module, so nothing
+    attributed it until something said so::
+
+        site_app = SiteApp(
+            blueprint=bp,
+            owns_tables=frozenset({"user", "role", "roles_users"}),
+        )
+    """
+
     def healthz(self) -> "Health | None":
         """Override to say whether this app is working.
 
@@ -323,8 +347,18 @@ def _import_app(module_name: str, table_owners: dict[str, str]) -> SiteApp:
     except InvalidRequestError as exc:
         raise RuntimeError(_clashing_table(module_name, table_owners, exc)) from exc
 
-    for table in sorted(_tables_declared_by(module_name)):
+    # Declared by defining module, plus whatever the app claims outright. The
+    # union matters in both directions: a table built inside a dependency
+    # (flask-security's `roles_users`) is invisible to attribution and reachable
+    # only through the claim, while a table the app defines itself is recorded
+    # whether it thought to claim it or not.
+    for table in sorted(_tables_declared_by(module_name) | site_app.owns_tables):
         table_owners[table] = site_app.name
+        if table in site_app.owns_tables:
+            # Claimed on purpose, so there is nothing to warn about. The
+            # ownership above is the point of saying so -- this is a
+            # declaration, not a mute.
+            continue
         if not table.startswith(site_app.name):
             # Warned here rather than checked at the clash, because the clash
             # happens on whichever site installs both apps -- by which time the
@@ -332,7 +366,8 @@ def _import_app(module_name: str, table_owners: dict[str, str]) -> SiteApp:
             logger.warning(
                 "app %r declares the table %r, which its own name does not "
                 "prefix. Table names are shared across every installed app, so "
-                "a second app claiming %r will stop a site booting.",
+                "a second app claiming %r will stop a site booting. Name it "
+                "in the app's `owns_tables` if it is deliberate.",
                 site_app.name,
                 table,
                 table,

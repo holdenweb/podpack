@@ -11,6 +11,7 @@ The third is `/`, and it is a *fallback* rather than a fixture -- see
 
 import os
 import time
+from collections.abc import Mapping
 
 import sqlalchemy as sa
 from flask import Blueprint, Flask, abort, current_app, jsonify, render_template
@@ -142,6 +143,36 @@ def _database_identity() -> dict[str, str]:
     return {"database": row[0], "database_user": row[1], "database_schema": row[2]}
 
 
+# Alembic's bookkeeping, and nobody's app. Not configured anywhere in this
+# substrate, so the default name is the name; a site that sets `version_table`
+# in its env.py will see that table reported as unclaimed, which is a fair
+# description of what podpack then knows about it.
+ALEMBIC_VERSION_TABLE = "alembic_version"
+
+
+def _unclaimed_tables(owners: Mapping[str, str]) -> list[str] | str:
+    """Tables in the database that no installed app answers for.
+
+    The same question `unclaimed()` asks of the data and log roots, asked of the
+    one namespace that is shared rather than divided by app name -- and asked of
+    the *database* rather than of `db.metadata`, for the same reason the roots
+    are read from disk: what a site declares and what it has are different
+    things, and the gap is the entire point. A table outlives the app removed
+    from `apps`, exactly as its data directory does.
+
+    Reported, never dropped. Removing a table because a config line changed
+    would destroy the data an uninstall deliberately preserves.
+    """
+    try:
+        present = set(sa.inspect(db.engine).get_table_names())
+    except SQLAlchemyError as exc:
+        # Same discipline as _database_identity: a diagnostic that only works
+        # once everything is right is no diagnostic.
+        db.session.rollback()
+        return f"(not reported: {type(exc).__name__})"
+    return sorted(present - set(owners) - {ALEMBIC_VERSION_TABLE})
+
+
 def _reported(site_app: SiteApp) -> dict[str, object]:
     """An app's own contribution, ready to merge, or why it could not make one.
 
@@ -206,6 +237,7 @@ def status() -> ResponseReturnValue:
         unclaimed={
             "data": unclaimed(state.data_root, state.apps),
             "logs": unclaimed(state.log_root, state.apps),
+            "tables": _unclaimed_tables(state.table_owners),
         },
         apps={
             name: {

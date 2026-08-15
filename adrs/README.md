@@ -50,6 +50,7 @@ here as against in `README.md` or `claude.md`.
 | [ADR-0009](0009-one-alembic-history.md) | **One history, driven by the app list.** Importing an app's models *is* registration. The footgun — autogenerate proposing to drop a disabled app's tables — is documented rather than fixed. |
 | [ADR-0010](0010-migrations-need-no-flask-app.md) | **The migration environment builds no Flask app.** A broken factory must not also be a broken migration. A test deletes the required secrets to keep that honest. |
 | [ADR-0011](0011-revisions-authored-on-the-host.md) | **Revisions are authored on the host, applied in the container.** Code being read-only to the process running it is correct; authoring is not a container's job. |
+| [ADR-0032](0032-tables-are-claimed-not-prefixed.md) | **Tables are claimed, not prefixed.** `owns_tables` declares the names an app means to hold, silencing the warning *by recording ownership*. Prefixing was proposed and rejected: the names are flask-security's, it is a migration over live rows, and it cannot reach `roles_users` — built inside a dependency, and owned by nobody until `unclaimed.tables` found it. |
 
 ## Configuration
 

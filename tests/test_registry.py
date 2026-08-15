@@ -13,9 +13,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import sqlalchemy as sa
 from flask import Blueprint, Flask, url_for
 from flask.testing import FlaskClient
-from sqlalchemy.exc import InvalidRequestError
+from sqlalchemy.exc import InvalidRequestError, SQLAlchemyError
 
 from conftest import SiteFactory
 
@@ -236,7 +237,14 @@ def test_status_works_on_any_dialect(client: FlaskClient) -> None:
     assert body["database_schema"].startswith("(not reported by sqlite")
     # ...and the parts that do not depend on the dialect are all still there.
     assert body["apps"]["widget"]["data_dir_writable"] is True
-    assert body["unclaimed"] == {"data": [], "logs": []}
+    assert body["unclaimed"]["data"] == []
+    assert body["unclaimed"]["logs"] == []
+    # `tables` is not asserted exactly here, and cannot be: `db.metadata` belongs
+    # to the process rather than to the site, so what `db.create_all()`
+    # materialises depends on which test modules have been imported by now. A
+    # deployment imports one site's apps and has no such ambiguity; the tests
+    # below assert membership for that reason.
+    assert isinstance(body["unclaimed"]["tables"], list)
 
 
 def test_data_left_by_an_uninstalled_app_is_reported(app: Flask) -> None:
@@ -633,6 +641,143 @@ def test_a_namespaced_table_name_is_not_warned_about(
     """The teeth on the one above: the fixture app's `widgets` starts with `widget`."""
     assert app.extensions["podpack"].table_owners["widgets"] == "widget"
     assert "widgets" not in caplog.text
+
+
+def _claiming_app(tag: str) -> str:
+    """Source for an app that claims both its own table and one it cannot see.
+
+    Names are varied per test on purpose. `db.metadata` belongs to the process,
+    and the `app_package` fixture drops the module from `sys.modules` at
+    teardown -- so a second test importing the same source re-executes the model
+    definition against metadata that already holds its table, and fails with the
+    clash this suite raises deliberately elsewhere.
+    """
+    return f'''
+from flask import Blueprint
+from podpack import SiteApp, db
+
+
+class Claimed(db.Model):
+    __tablename__ = "claimed_noun_{tag}"
+    id = db.Column(db.Integer, primary_key=True)
+
+
+# No model and so no mapper, which is what makes it invisible to attribution by
+# defining module -- the shape of flask-security's `roles_users`.
+association = db.Table(
+    "built_elsewhere_{tag}",
+    db.Column("left_id", db.Integer),
+    db.Column("right_id", db.Integer),
+)
+
+blueprint = Blueprint("claimer_{tag}", __name__)
+
+
+@blueprint.route("/")
+def index() -> str:
+    return "hi"
+
+
+site_app = SiteApp(
+    blueprint=blueprint,
+    url_prefix="/claimer",
+    owns_tables=frozenset({{"claimed_noun_{tag}", "built_elsewhere_{tag}"}}),
+)
+'''
+
+
+def _install_only(site: SiteFactory, name: str, **overrides: Any) -> Flask:
+    """Build a site whose app list is exactly one named app."""
+    return site(
+        host_config={"site": {"name": "x", "environment": "test", "apps": [name]}},
+        **overrides,
+    )
+
+
+def test_a_claimed_table_name_is_not_warned_about(
+    site: SiteFactory,
+    app_package: Callable[[str, str], str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Some names are not the app's to choose.
+
+    flask-security derives `user` and `role` from its own mixins, and its
+    datastore, its documentation and its join table all assume them. Saying so
+    is what distinguishes a deliberate name from the accident the warning is
+    for.
+    """
+    app_package("claiming_app_quiet", _claiming_app("quiet"))
+    with caplog.at_level(logging.WARNING, logger="podpack.registry"):
+        _install_only(site, "claiming_app_quiet")
+
+    assert "claimed_noun_quiet" not in caplog.text
+
+
+def test_claiming_a_table_records_who_owns_it(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """A declaration, not a mute -- which is the whole reason to prefer it.
+
+    `built_elsewhere` has no mapper, so attribution by defining module cannot
+    see it at all; without the claim nothing in the site knows who answers for
+    it. That is the `roles_users` hole, closed.
+    """
+    app_package("claiming_app_owned", _claiming_app("owned"))
+    owners = _install_only(site, "claiming_app_owned").extensions["podpack"].table_owners
+    assert owners["claimed_noun_owned"] == "claimer_owned"
+    assert owners["built_elsewhere_owned"] == "claimer_owned"
+
+
+def test_a_table_no_app_answers_for_is_reported(
+    app: Flask, client: FlaskClient
+) -> None:
+    """The same question `unclaimed` asks of the roots, asked of the database.
+
+    A table outlives the app removed from `apps`, exactly as its data directory
+    does -- deliberately, because uninstalling a feature must not destroy what
+    it was holding. Reported so the schema and `/_status` cannot quietly
+    disagree about what the site consists of.
+    """
+    with app.app_context():
+        db.session.execute(sa.text("CREATE TABLE retired_apps_leftovers (id INTEGER)"))
+        db.session.commit()
+
+    tables = client.get("/_status").get_json()["unclaimed"]["tables"]
+    assert "retired_apps_leftovers" in tables
+    # The installed app's own table is answered for, so it is not in the list.
+    assert "widgets" not in tables
+
+
+def test_alembics_own_bookkeeping_is_not_unclaimed(
+    app: Flask, client: FlaskClient
+) -> None:
+    """It belongs to the migration history rather than to any app, and reporting
+    it every time would train the reader to ignore the field."""
+    with app.app_context():
+        db.session.execute(sa.text("CREATE TABLE alembic_version (version_num TEXT)"))
+        db.session.commit()
+
+    assert "alembic_version" not in client.get("/_status").get_json()["unclaimed"]["tables"]
+
+
+def test_unclaimed_tables_survive_a_database_that_cannot_be_read(
+    app: Flask, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A diagnostic that only works once everything is right is no diagnostic.
+
+    The same rule `_database_identity` already follows: the route reporting the
+    mounts and grants is the one an operator reaches for when something is
+    already wrong, so a failure here is a sentence in the report rather than a
+    500 that hides the rest of it.
+    """
+    def unreadable(_engine: object) -> object:
+        raise SQLAlchemyError("no route to host")
+
+    monkeypatch.setattr("podpack.core.sa.inspect", unreadable)
+    body = client.get("/_status").get_json()
+    assert body["unclaimed"]["tables"] == "(not reported: SQLAlchemyError)"
+    # ...and everything that does not depend on the database is still there.
+    assert body["apps"]["widget"]["data_dir_writable"] is True
 
 
 REPORTING_APP = '''

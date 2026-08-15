@@ -91,18 +91,30 @@ The import name is worth having in front of you, because it is routinely *not*
 the app's own name — `podpack_notes` is what `apps` lists, and `notes` is what
 keys `[site.mounts]`, `[apps.<name>]` and the directories on disk.
 
-It also reports anything under the roots that **no installed app answers for**:
+It also reports anything **no installed app answers for**:
 
 ```json
-"unclaimed": { "data": ["retired_app"], "logs": ["retired_app"] }
+"unclaimed": {
+  "data": ["retired_app"],
+  "logs": ["retired_app"],
+  "tables": ["retired_app_notes"]
+}
 ```
 
-Normally both are empty, because the roots hold one subdirectory per installed
-app and nothing else. They drift legitimately, though: removing an app from
-`apps` deliberately does *not* delete its data, since uninstalling a feature
-should not destroy what it was holding. Reported rather than removed — deleting
-data because a config line changed would be the wrong instinct — so the answer
-to "do I have redundant components installed?" is visible .
+Normally all three are empty. The roots hold one subdirectory per installed app
+and nothing else, and every table belongs to some app. They drift legitimately,
+though: removing an app from `apps` deliberately does *not* delete its data or
+drop its tables, since uninstalling a feature should not destroy what it was
+holding. Reported rather than removed — deleting data because a config line
+changed would be the wrong instinct — so the answer to "do I have redundant
+components installed?" is visible.
+
+`tables` is read from the **database** rather than from `db.metadata`, for the
+same reason the roots are read from disk: what a site declares and what it has
+are different things, and the gap is the entire point. Alembic's own
+`alembic_version` is excluded, belonging to the migration history rather than to
+any app. A table appearing here that you did *not* expect usually means either a
+retired app or an app that never declared what it owns — see `owns_tables`.
 
 Shut down with `podman compose down`, and come back with `podman compose up -d`
 — not `start`; see [Stopping and starting](#stopping-and-starting). Host storage
@@ -135,6 +147,7 @@ site_app = SiteApp(
 | `url_prefix` | Where the app *asks* to be mounted. `None` means the site root, and the site can overrule it — see below. |
 | `nav` | `Section(label, endpoint)` entries contributed to the site's navigation, in installation order. |
 | `init` | Optional `callable(app)`, run before the blueprint is registered, for config keys and services. |
+| `owns_tables` | Table names this app claims deliberately, when its own name does not prefix them. Silences the warning below *by recording ownership*, so `/_status` can report who answers for the table. |
 
 Two methods are optional overrides rather than fields, because an app that
 wants them usually wants both and usually has state to consult:
