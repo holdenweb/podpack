@@ -81,8 +81,7 @@ app and nothing else. They drift legitimately, though: removing an app from
 `apps` deliberately does *not* delete its data, since uninstalling a feature
 should not destroy what it was holding. Reported rather than removed — deleting
 data because a config line changed would be the wrong instinct — so the answer
-to "what is still on disk, and do I still want it?" is visible rather than
-merely true.
+to "do I have redundant components installed?" is visible .
 
 Shut down with `podman compose down`, and come back with `podman compose up -d`
 — not `start`; see [Stopping and starting](#stopping-and-starting). Host storage
