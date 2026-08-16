@@ -218,25 +218,18 @@ flask --app mysite roles add you@example.com admin
 These are flask-security's commands, and `--active` is the one to remember:
 without it the account exists and cannot sign in.
 
-Your site tells podpack who qualifies, because podpack has no login of its
-own — pass a predicate to the factory:
+That is the whole of it. Login is podpack's (ADR-0033), so there is no
+`models.py` to write, no `Security()` to construct and no predicate to pass —
+`create_app` installs `podpack.auth`, and `/_status` asks its `is_admin`.
 
-```python
-from flask_security import current_user
-import podpack
+Until the role exists and somebody holds it, `/_status` answers 404 to
+everyone including you. That is correct for a route publishing your database
+identity and every host path, but a 404 is indistinguishable from a missing
+route, so podpack says why in the log at every boot rather than leaving you
+to find out by querying the role table.
 
-def create_app():
-    return podpack.create_app(
-        site_package="mysite",
-        init=_wire,
-        admin=lambda: current_user.is_authenticated
-                      and current_user.has_role(podpack.ADMIN_ROLE),
-    )
-```
-
-Leave `admin` unset and nobody qualifies: `/_status` answers 404 for
-everyone, which is the right default for a route that would otherwise
-publish your database identity to anyone who can reach the site.
+*(A site with its own idea of who counts as an operator may still pass
+`create_app(admin=…)`. Few will want to.)*
 
 ### 9. Look at it, without containers
 

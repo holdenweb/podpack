@@ -16,10 +16,12 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
 from jinja2 import ChoiceLoader, PackageLoader
 
+from . import auth
+from .auth import ADMIN_ROLE, User, is_admin
 from .config import app_config, installed_apps, load_host_config, require_env
+from .database import db
 from .nav import Section, sections
 from .registry import Health, PodpackState, SiteApp, install_apps
 from .urls import absolute_url, base_url, check_base_url
@@ -29,11 +31,13 @@ __all__ = [
     "Health",
     "Section",
     "SiteApp",
+    "User",
     "absolute_url",
     "app_config",
     "base_url",
     "create_app",
     "db",
+    "is_admin",
     "sections",
 ]
 
@@ -41,22 +45,6 @@ logger = logging.getLogger(__name__)
 
 # Created unbound and attached to an app inside create_app(), so that several
 # app instances -- one per test, say -- can coexist safely.
-db = SQLAlchemy()
-
-ADMIN_ROLE = "admin"
-"""The role a site's `admin` predicate should ask about.
-
-A name and nothing else. podpack ships no command to create it and no model
-to hold it: flask-security already has `users create`, `roles create` and
-`roles add`, and its versions validate the identity through the registration
-form and resolve users the way the rest of it does. A framework command
-would have been a worse copy of three that exist -- so what podpack
-contributes here is one spelling, so that a site and its guard agree.
-
-    flask --app <site> users create you@example.com --active
-    flask --app <site> roles create admin
-    flask --app <site> roles add you@example.com admin
-"""
 
 DEFAULT_DATA_ROOT = "/var/lib/holdenweb/apps"
 DEFAULT_LOG_ROOT = "/var/log/holdenweb/apps"
@@ -95,10 +83,9 @@ def create_app(
 
     `admin` is a predicate answering "is this request an operator's?", and it
     guards `/_status`, which reports the site's database identity, its paths
-    and its versions. podpack cannot answer that question itself: it has no
-    login, because login is the site's to wire. Left unset, nobody qualifies
-    and the endpoint reports nothing -- the safe default for a route that is
-    otherwise reachable by anyone who can reach the site.
+    and its versions. Left unset it is `auth.is_admin` -- membership of the
+    `admin` role -- because login is podpack's since ADR-0033. Pass one only
+    if this site's idea of an operator is not that.
 
     `host_config` and the various roots exist so that tests can build a site
     without a mounted filesystem. In production every one of them is left unset
@@ -115,10 +102,20 @@ def create_app(
         app.config.update(config_overrides)
 
     app.extensions["podpack"] = PodpackState(
-        admin=admin,
+        # A site may still pass its own predicate -- a test does, and a site
+        # with an unusual idea of who counts as an operator may -- but it no
+        # longer has to, and leaving it unset no longer means nobody qualifies.
+        admin=admin if admin is not None else auth.is_admin,
         host_config=host_config,
         data_root=Path(data_root or os.environ.get("PODPACK_DATA_ROOT", DEFAULT_DATA_ROOT)),
         log_root=Path(log_root or os.environ.get("PODPACK_LOG_ROOT", DEFAULT_LOG_ROOT)),
+    )
+    # podpack is not an installed app, so attribution by defining module never
+    # reaches its own tables and `/_status` would report all three as answered
+    # for by nobody. Recorded before the apps install, so that an app claiming
+    # `user` collides with the framework rather than silently taking it over.
+    app.extensions["podpack"].table_owners.update(
+        dict.fromkeys(auth.OWNED_TABLES, "podpack")
     )
 
     db.init_app(app)
@@ -135,6 +132,11 @@ def create_app(
     # can read `app_config()` and the host config like anything else.
     if init is not None:
         init(app)
+
+    # After the site's `init`, which is where a site configures flask-security
+    # -- its message strings, its templates, whether registration is open --
+    # and where it names a mail_util_cls if it sends its own mail.
+    auth.install(app, mail_util_cls=app.config.get("PODPACK_MAIL_UTIL_CLS"))
 
     install_apps(app, installed_apps(host_config))
     # After the apps, so anything that routes `/` keeps it; see install_home_page.
@@ -163,29 +165,18 @@ def _report_unreachable_status(app: Flask) -> None:
     answered 404 to every request including its owner's, and the only way to
     find out why was to query the database by hand.
 
-    A warning, not an error. A site with no operator is perfectly legitimate --
-    the container lab is one, and podpack has no login of its own to give it
-    (ADR-0025) -- so this reports a fact and starts the site regardless.
-    """
-    if app.extensions["podpack"].admin is None:
-        logger.warning(
-            "no `admin` predicate: /_status will answer 404 to everyone. That is "
-            "the safe default for a route reporting the database identity and "
-            "every host path; pass create_app(admin=...) to name this site's "
-            "operators."
-        )
-        return
+    A warning, not an error. A database with no `admin` role yet is the
+    ordinary state of a site on its first run, and it should start and serve so
+    that somebody can go and create one.
 
-    # podpack owns no role model and no user table -- the whole point of
-    # ADR-0025 -- so there is nothing here it can query directly. What it can do
-    # is ask the extension the site wired, if it wired that one. A site whose
-    # predicate asks about something else entirely gets no warning, which is the
-    # right way round: a false alarm about a role you deliberately do not use
-    # would be worse than silence.
-    security = app.extensions.get("security")
-    datastore = getattr(security, "datastore", None)
-    if datastore is None:
-        return
+    The other half of this check used to be "no `admin` predicate was passed",
+    which is gone: since ADR-0033 login is podpack's, `create_app` falls back
+    to `auth.is_admin`, and there is no longer a way to end up with a site
+    whose operator question nobody can answer. That warning fired for ever on
+    two sites where the condition was permanent and correct -- exactly the
+    noise this one exists to avoid becoming.
+    """
+    datastore = app.extensions["security"].datastore
     try:
         with app.app_context():
             missing = datastore.find_role(ADMIN_ROLE) is None

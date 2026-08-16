@@ -20,7 +20,16 @@ from sqlalchemy.exc import InvalidRequestError, SQLAlchemyError
 
 from conftest import SiteFactory
 
-from podpack import Section, SiteApp, absolute_url, app_config, create_app, db
+from podpack import (
+    ADMIN_ROLE,
+    Section,
+    SiteApp,
+    absolute_url,
+    app_config,
+    create_app,
+    db,
+)
+from podpack.auth import user_datastore
 from podpack.paths import data_dir, unclaimed
 
 
@@ -728,6 +737,23 @@ def test_claiming_a_table_records_who_owns_it(
     assert owners["built_elsewhere_owned"] == "claimer_owned"
 
 
+def test_podpack_answers_for_its_own_tables(app: Flask, client: FlaskClient) -> None:
+    """The framework is not an installed app, so nothing else would.
+
+    Attribution is by defining module and walks the app list, which podpack is
+    not on -- so its login tables would be reported as answered for by nobody,
+    on every site, for ever. `roles_users` is the sharper case: flask-security
+    builds it inside itself, so even an app declaring these models would not
+    have it attributed. See ADR-0032, where that hole was first found, and
+    ADR-0033, which put these tables here.
+    """
+    owners = app.extensions["podpack"].table_owners
+    assert {owners.get(t) for t in ("user", "role", "roles_users")} == {"podpack"}
+
+    unclaimed_tables = client.get("/_status").get_json()["unclaimed"]["tables"]
+    assert not {"user", "role", "roles_users"} & set(unclaimed_tables)
+
+
 def test_a_table_no_app_answers_for_is_reported(
     app: Flask, client: FlaskClient
 ) -> None:
@@ -932,82 +958,87 @@ def test_a_guard_that_raises_denies(site: SiteFactory) -> None:
     assert app.test_client().get("/_status").status_code == 404
 
 
-def _wire_security(datastore: object) -> Callable[[Flask], None]:
-    """A site's `init` doing what flask-security's does: leaving its extension.
+@pytest.fixture
+def booted_twice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, host_config: dict[str, Any]
+) -> Callable[..., Flask]:
+    """Build a site whose database survives to a *second* `create_app`.
 
-    Stubbed rather than installed, because flask-security is a *site's*
-    dependency and not podpack's (ADR-0025) -- so these tests must not need it
-    present, which is also what proves the check is optional at runtime.
+    The check runs during boot, and the shared fixture creates its tables
+    afterwards -- so on the in-memory database every boot finds no `role` table
+    at all, takes the "not migrated yet" branch, and says nothing. A test
+    asserting silence would then pass without the code under it working, which
+    is how the first version of these passed against a stub.
+
+    A file on disk instead, so the first build leaves a schema for the second
+    to boot against. That second boot is the real case: tables present,
+    `admin` role absent.
     """
-    def _init(app: Flask) -> None:
-        app.extensions["security"] = SimpleNamespace(datastore=datastore)
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", f"sqlite:///{tmp_path / 'site.db'}")
 
-    return _init
+    def _build(**overrides: Any) -> Flask:
+        return create_app(
+            host_config=host_config,
+            data_root=tmp_path / "data",
+            log_root=tmp_path / "logs",
+            admin=lambda: True,
+            **overrides,
+        )
 
-
-def test_a_site_with_no_operator_says_so_at_boot(
-    site: SiteFactory, caplog: pytest.LogCaptureFixture
-) -> None:
-    """404 makes a refusal and a missing route indistinguishable from outside.
-
-    So the reason has to reach the log, or it reaches nobody.
-    """
-    with caplog.at_level(logging.WARNING, logger="podpack"):
-        site(admin=None)
-    assert "/_status will answer 404 to everyone" in caplog.text
+    first = _build()
+    with first.app_context():
+        db.create_all()
+    return _build
 
 
 def test_a_missing_admin_role_says_so_at_boot(
-    site: SiteFactory, caplog: pytest.LogCaptureFixture
+    booted_twice: Callable[..., Flask], caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The case that actually happened: predicate wired, role never created.
+    """The case that actually happened: login wired, role never created.
 
-    The site answered 404 to its own owner, and the only way to find out why
-    was to query the database by hand.
+    The site answered 404 to its own owner, and 404 makes a refusal and a
+    missing route indistinguishable from outside -- so the reason has to reach
+    the log or it reaches nobody. Against podpack's real datastore now that
+    login is core, rather than the stub this needed when it was the site's.
     """
-    datastore = SimpleNamespace(find_role=lambda name: None)
     with caplog.at_level(logging.WARNING, logger="podpack"):
-        site(admin=lambda: True, init=_wire_security(datastore))
+        booted_twice()
     assert "no 'admin' role exists" in caplog.text
     assert "roles create admin" in caplog.text
     assert "roles add <email> admin" in caplog.text
 
 
 def test_an_existing_admin_role_is_silent(
-    site: SiteFactory, caplog: pytest.LogCaptureFixture
+    booted_twice: Callable[..., Flask], caplog: pytest.LogCaptureFixture
 ) -> None:
-    datastore = SimpleNamespace(find_role=lambda name: object())
+    """The warning is about a fixable state, so it stops once it is fixed."""
+    app = booted_twice()
+    with app.app_context():
+        user_datastore.create_role(name=ADMIN_ROLE)
+        db.session.commit()
+
+    caplog.clear()
     with caplog.at_level(logging.WARNING, logger="podpack"):
-        site(admin=lambda: True, init=_wire_security(datastore))
-    assert "admin" not in caplog.text
-
-
-def test_a_site_that_wires_no_security_extension_is_silent(
-    site: SiteFactory, caplog: pytest.LogCaptureFixture
-) -> None:
-    """podpack owns no role model, so it has nothing of its own to consult.
-
-    A site whose predicate asks about something else entirely gets no warning:
-    a false alarm about a role you deliberately do not use is worse than
-    silence.
-    """
-    with caplog.at_level(logging.WARNING, logger="podpack"):
-        site(admin=lambda: True)
-    assert "role" not in caplog.text
+        booted_twice()
+    assert "no 'admin' role exists" not in caplog.text
 
 
 def test_an_unreadable_role_table_does_not_break_the_boot(
-    site: SiteFactory, caplog: pytest.LogCaptureFixture
+    site: SiteFactory, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Ordinary rather than exceptional: `migrate` creates those tables, and a
     site boots against a database that has none often enough -- in tests, and
     in the window before the first migration runs. A diagnostic that could stop
     a site starting would be a poor trade for the thing it diagnoses."""
-    def explode(name: str) -> object:
-        raise RuntimeError("relation \"role\" does not exist")
+    def explode(self: object, name: str) -> object:
+        raise RuntimeError('relation "role" does not exist')
 
+    monkeypatch.setattr(
+        "flask_security.datastore.SQLAlchemyUserDatastore.find_role", explode
+    )
     with caplog.at_level(logging.WARNING, logger="podpack"):
-        app = site(admin=lambda: True, init=_wire_security(SimpleNamespace(find_role=explode)))
+        app = site(admin=lambda: True)
     assert caplog.text == ""
     assert app.test_client().get("/_status").status_code == 200
 

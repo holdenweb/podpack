@@ -641,10 +641,32 @@ The password is prompted for, hidden and confirmed. **`--active` matters**:
 without it the account is created and cannot sign in, which looks exactly
 like a wrong password.
 
-podpack contributes the name and nothing else — `podpack.ADMIN_ROLE`, so a
-site and its guard agree on one spelling. It ships no command of its own
-here, because these three exist and validate the identity through the
-registration form; a framework version would have been a worse copy.
+Login itself is podpack's, not yours to wire —
+[ADR-0033](https://github.com/holdenweb/podpack/blob/main/adrs/0033-login-is-core.md).
+`podpack.auth` ships the `User` and `Role` models, the datastore and the
+`is_admin` predicate `/_status` asks, and `create_app` installs them. A site
+writes nothing: no `models.py`, no `Security()`, no predicate. Mail and
+session policy remain the site's, under
+[ADR-0025](https://github.com/holdenweb/podpack/blob/main/adrs/0025-the-site-wires-its-own-extensions.md).
+
+The three commands above are still flask-security's rather than podpack's,
+because they exist, validate the identity through the registration form and
+resolve users the way the rest of flask-security does; a framework copy would
+only be a worse one.
+
+**podpack says so at boot** when the role does not exist yet:
+
+```
+WARNING podpack: no 'admin' role exists, so /_status will answer 404 to
+everyone -- including you. Create it and grant it: ...
+```
+
+That exists because the endpoint refuses with 404 rather than 403 on purpose,
+which makes a refusal and a missing route identical from outside. It cost an
+afternoon once.
+
+A site with an unusual idea of who counts as an operator can still pass its
+own `create_app(admin=…)`; the default is a default, not a fixture.
 
 ## Getting it, and keeping it current
 

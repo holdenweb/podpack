@@ -191,9 +191,9 @@ def _reported(site_app: SiteApp) -> dict[str, object]:
 def _is_operator() -> bool:
     """Whether this request may read the site's own configuration.
 
-    A predicate the *site* supplies, because podpack has no login of its own
-    (ADR-0025). An exception in it counts as a refusal: a guard that fails
-    open is not a guard.
+    `auth.is_admin` unless the site replaced it (ADR-0033). An exception in it
+    counts as a refusal, and so does `None`: a guard that fails open is not a
+    guard, and `create_app` can no longer leave this unset in any case.
     """
     admin = current_app.extensions["podpack"].admin
     if admin is None:

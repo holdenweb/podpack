@@ -1,6 +1,6 @@
 [project]
 name = "podpack"
-version = "0.4.3"
+version = "0.5.0"
 description = "A framework for building and running web sites out of pluggable apps"
 readme = "README.md"
 license = "MIT"
@@ -28,6 +28,11 @@ dependencies = [
     "psycopg2-binary>=2.9.10",
     "alembic>=1.13",
     "gunicorn>=22.0",
+    # Login is core rather than each site's to wire (ADR-0033). It brings
+    # flask-wtf and passlib with it, and the `users`/`roles` commands a site
+    # needs before anybody can read /_status.
+    "flask-security-too>=5.6.2",
+    "argon2-cffi>=25.1.0",
 ]
 
 # The driver for an optional core service, installed only by a site that runs

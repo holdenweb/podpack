@@ -1,6 +1,9 @@
 # ADR-0025: The site wires its own extensions
 
-**Status:** Accepted
+**Status:** Accepted — its **login** clause is superseded by
+[ADR-0033](0033-login-is-core.md). Mail and session policy stand, and the
+reasoning below about why none of the three is an *app* is untouched: what
+changed is who owns login, not what it is.
 
 **Date:** 2026-08-08
 

@@ -172,10 +172,11 @@ class PodpackState:
     admin: "Callable[[], bool] | None" = None
     """Whether the current request is an operator's.
 
-    podpack has no login of its own -- authentication belongs to the site
-    (ADR-0025) -- so it cannot ask flask-security anything. The site supplies
-    the predicate instead, and podpack asks it before reporting anything
-    about the site's own configuration. `None` means nobody qualifies.
+    `create_app` fills this with `auth.is_admin` -- membership of the `admin`
+    role -- unless the site passed its own, login being podpack's since
+    ADR-0033. `None` remains "nobody qualifies", which is the right reading
+    for a state `create_app` no longer produces but a directly-constructed
+    state still can.
     """
     apps: dict[str, SiteApp] = field(default_factory=dict)
     nav: list[Section] = field(default_factory=list)
