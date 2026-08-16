@@ -74,7 +74,7 @@
     },
     "alembic/script.py.mako": {
       "class": "verbatim",
-      "sha256": "d38920781b4d31ae1c0a71bc09f41c2ade8feab9e5a087e3f30cb4bbf0c1c9d3"
+      "sha256": "d048c14c26af1f773f60ab49f45daa921e810e7d68b35cf4aea609cd00b95298"
     },
     "alembic/versions/.gitkeep": {
       "class": "seeded",
@@ -152,6 +152,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.4.3",
+  "podpack_version": "0.5.1",
   "substrate_schema": 1
 }
