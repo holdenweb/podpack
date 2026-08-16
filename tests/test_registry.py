@@ -472,6 +472,7 @@ def test_migration_metadata_needs_no_application(tmp_path: Path, monkeypatch: py
     """
     monkeypatch.delenv("SECRET_KEY", raising=False)
     monkeypatch.delenv("SQLALCHEMY_DATABASE_URI", raising=False)
+    monkeypatch.delenv("SECURITY_PASSWORD_SALT", raising=False)
 
     config = tmp_path / "app.toml"
     config.write_text('[site]\nname = "x"\napps = ["fixture_app"]\n')
@@ -479,6 +480,26 @@ def test_migration_metadata_needs_no_application(tmp_path: Path, monkeypatch: py
     from podpack.migrations import target_metadata
 
     assert "widgets" in target_metadata(config).tables
+
+
+@pytest.mark.parametrize(
+    "missing", ["SECRET_KEY", "SQLALCHEMY_DATABASE_URI", "SECURITY_PASSWORD_SALT"]
+)
+def test_a_missing_secret_stops_the_boot_by_name(
+    site: SiteFactory, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    """Each required secret fails at boot, saying which one it was.
+
+    SECURITY_PASSWORD_SALT is here because it did not. Login became core
+    without its configuration becoming core with it, so a site started
+    perfectly and died later inside `flask users create`, with
+    flask-security's own message naming a setting nobody had heard of. A
+    framework that requires a secret should say so while there is still a
+    stack trace worth reading.
+    """
+    monkeypatch.delenv(missing, raising=False)
+    with pytest.raises(RuntimeError, match=missing):
+        site()
 
 
 def test_unknown_app_is_a_boot_failure(site: SiteFactory) -> None:
@@ -975,6 +996,7 @@ def booted_twice(
     `admin` role absent.
     """
     monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("SECURITY_PASSWORD_SALT", "test-password-salt")
     monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", f"sqlite:///{tmp_path / 'site.db'}")
 
     def _build(**overrides: Any) -> Flask:

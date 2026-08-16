@@ -28,6 +28,7 @@
       "PODPACK_DATA_ROOT",
       "PODPACK_LOG_ROOT",
       "SECRET_KEY",
+      "SECURITY_PASSWORD_SALT",
       "SQLALCHEMY_DATABASE_URI"
     ],
     "secrets.env.example": [
@@ -37,6 +38,7 @@
       "POSTGRES_PASSWORD",
       "POSTGRES_USER",
       "SECRET_KEY",
+      "SECURITY_PASSWORD_SALT",
       "SQLALCHEMY_DATABASE_URI"
     ]
   },
@@ -152,6 +154,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.5.1",
+  "podpack_version": "0.5.2",
   "substrate_schema": 1
 }

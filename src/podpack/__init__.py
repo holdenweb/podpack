@@ -211,6 +211,17 @@ def _configure(app: Flask, host_config: dict[str, Any]) -> None:
 
     app.config["SECRET_KEY"] = require_env("SECRET_KEY")
     app.config["SQLALCHEMY_DATABASE_URI"] = require_env("SQLALCHEMY_DATABASE_URI")
+    # Required since login became core (ADR-0033), and required rather than
+    # defaulted for the reason a shared default would be worse than useless:
+    # flask-security's "salt" is the HMAC key its password hashes are keyed on,
+    # so one baked into the framework would make every podpack site's hashes
+    # verifiable against every other's.
+    #
+    # Failing here, at boot, is the whole point. Without it the site starts
+    # perfectly and dies later inside `flask users create` or a registration,
+    # with flask-security's own message naming a setting nobody has heard of --
+    # which is exactly how this was found.
+    app.config["SECURITY_PASSWORD_SALT"] = require_env("SECURITY_PASSWORD_SALT")
     app.config["SQLALCHEMY_ECHO"] = database.get("echo", False)
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 

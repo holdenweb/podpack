@@ -23,6 +23,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 TEST_ENV = {
     "SECRET_KEY": "test-secret-key",
     "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+    # Required since login became core: flask-security keys its password hashes
+    # on this and refuses to hash without it.
+    "SECURITY_PASSWORD_SALT": "test-password-salt",
 }
 
 
