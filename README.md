@@ -624,6 +624,55 @@ additively, which is how the ordering guarantees survive being optional.
 Measured, and recorded in
 [ADR-0028](https://github.com/holdenweb/podpack/blob/main/adrs/0028-core-services-are-overlays-the-site-chooses.md).
 
+## Secrets, checked at boot
+
+podpack refuses to start without `SECRET_KEY`, `SQLALCHEMY_DATABASE_URI` and
+`SECURITY_PASSWORD_SALT`, and reports **every** one it is missing in a single
+message rather than the first:
+
+```
+this site cannot start: not set: SECRET_KEY, SECURITY_PASSWORD_SALT, MAIL_PASSWORD.
+Secrets come from the environment, which compose fills from secrets.env; a local
+run gets them from dev.env via scripts/dev.sh.
+```
+
+All at once because one name per restart is one *rebuild* per name on a
+containerised deployment. Each name is reported with whoever wants it, since
+that is what tells you whether to supply the secret or to stop installing the
+thing that asked for it.
+
+Two other parties can add to the list. A **site**, by name, in the host
+config:
+
+```toml
+[site]
+secrets = ["MAIL_PASSWORD"]
+```
+
+and an **app**, in its own `SiteApp` — because the author knows what the app
+reads and the site owner installing it has no way to:
+
+```python
+site_app = SiteApp(blueprint=bp, requires_secrets=frozenset({"MAPS_API_KEY"}))
+```
+
+Names in the file or the app, values in the environment — the same split as
+everywhere else. Declare only what the thing genuinely cannot run without: a
+key that turns on an optional feature belongs in `[apps.<name>]` config with a
+sensible absence, because naming it here makes the whole site refuse to start.
+
+The apps' declarations are checked immediately after the apps are imported,
+which is the first moment they exist; podpack's own three are checked before
+anything reads them, which is earlier still. Both are long before the site
+serves.
+
+An **empty** value counts as missing, because `SECRET_KEY=` in an env file is
+not a configured site. So does one still holding `CHANGEME` or an
+unsubstituted `@@TOKEN@@`: those mean a file was installed and never edited,
+which is not a value but the absence of one wearing a value's clothes — and
+they are worth catching precisely because a site boots on them quite happily
+and is wrong in a way nothing else reports.
+
 ## The first administrator
 
 `/_status` answers a member of the `admin` role and nobody else, and a fresh

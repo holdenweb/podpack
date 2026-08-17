@@ -37,6 +37,7 @@ from typing import Any
 from flask import Blueprint, Flask
 from sqlalchemy.exc import InvalidRequestError
 
+from .config import check_secrets
 from .nav import Section
 from .paths import attach_file_logging, prepare
 
@@ -88,6 +89,26 @@ class SiteApp:
     """Called before the blueprint is registered, for config keys and services
     the app needs. The site's own config is already loaded by this point, so an
     app can read its section of the host config file here."""
+
+    requires_secrets: frozenset[str] = frozenset()
+    """Environment variables this app cannot work without.
+
+    Declared here for the same reason `owns_tables` is: the author knows, and
+    the site owner installing the app has no way to. Checked at boot with
+    podpack's own and the site's, so installing an app that needs a credential
+    stops the deployment rather than failing the first time somebody uses the
+    feature::
+
+        site_app = SiteApp(blueprint=bp, requires_secrets=frozenset({"MAPS_API_KEY"}))
+
+    Checked *after* the apps are imported, which is the earliest moment their
+    declarations exist -- podpack's own three are checked before anything reads
+    them, which is earlier still. Both are long before the site serves.
+
+    Only what the app genuinely cannot run without. A key that turns on an
+    optional feature belongs in `[apps.<name>]` config with a sensible absence,
+    not here: naming it here makes the whole site refuse to start.
+    """
 
     owns_tables: frozenset[str] = frozenset()
     """Table names this app claims deliberately, whatever they are called.
@@ -213,6 +234,17 @@ def install_apps(app: Flask, names: Iterable[str]) -> None:
         state.apps[site_app.name] = site_app
         state.installed_from[site_app.name] = name
     _check_mounts(state)
+    # Here rather than in create_app's opening lines because this is the first
+    # moment the declarations exist: an app's requirements arrive with the app.
+    # Still before a single request is served, and all of them together, so
+    # installing three apps that each want a credential is one message.
+    check_secrets(
+        {
+            secret: f"app {site_app.name!r}"
+            for site_app in state.apps.values()
+            for secret in sorted(site_app.requires_secrets)
+        }
+    )
 
 
 def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:

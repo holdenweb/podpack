@@ -20,7 +20,14 @@ from jinja2 import ChoiceLoader, PackageLoader
 
 from . import auth
 from .auth import ADMIN_ROLE, User, is_admin
-from .config import app_config, installed_apps, load_host_config, require_env
+from .config import (
+    app_config,
+    check_secrets,
+    framework_secrets,
+    installed_apps,
+    load_host_config,
+    require_env,
+)
 from .database import db
 from .nav import Section, sections
 from .registry import Health, PodpackState, SiteApp, install_apps
@@ -94,6 +101,10 @@ def create_app(
     if host_config is None:
         host_config = load_host_config(config_path)
     check_base_url(host_config)
+    # Before anything reads one, so that a misconfigured deployment says which
+    # secrets it is short of -- all of them, in one message -- rather than
+    # failing later and more obscurely on whichever is read first.
+    check_secrets(framework_secrets(host_config))
 
     app = Flask(site_package or __name__)
 
