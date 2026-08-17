@@ -108,7 +108,7 @@ def index() -> str:
 site_app = SiteApp(
     blueprint=blueprint,
     url_prefix="/needy",
-    requires_secrets=frozenset({"MAPS_API_KEY"}),
+    needs_secrets=frozenset({"MAPS_API_KEY"}),
 )
 '''
 

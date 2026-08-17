@@ -52,6 +52,7 @@ here as against in `README.md` or `claude.md`.
 | [ADR-0010](0010-migrations-need-no-flask-app.md) | **The migration environment builds no Flask app.** A broken factory must not also be a broken migration. A test deletes the required secrets to keep that honest. |
 | [ADR-0011](0011-revisions-authored-on-the-host.md) | **Revisions are authored on the host, applied in the container.** Code being read-only to the process running it is correct; authoring is not a container's job. |
 | [ADR-0032](0032-tables-are-claimed-not-prefixed.md) | **Tables are claimed, not prefixed.** `owns_tables` declares the names an app means to hold, silencing the warning *by recording ownership*. Prefixing was proposed and rejected: the names are flask-security's, it is a migration over live rows, and it cannot reach `roles_users` — built inside a dependency, and owned by nobody until `unclaimed.tables` found it. |
+| [ADR-0034](0034-apps-declare-what-they-need.md) | **Apps declare what they need, and podpack checks it.** `needs_tables`/`defines_tables`/`needs_secrets`, with `defined_by` (one app) split from `needed_by` (a set) — 0032's single owner silently replaced the first app to declare a table. A need nothing defines is now a boot failure: a schema-level dependency between apps, looser than an import. Prefix-based ownership was considered and fails on `user`. |
 
 ## Configuration
 

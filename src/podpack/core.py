@@ -150,8 +150,8 @@ def _database_identity() -> dict[str, str]:
 ALEMBIC_VERSION_TABLE = "alembic_version"
 
 
-def _unclaimed_tables(owners: Mapping[str, str]) -> list[str] | str:
-    """Tables in the database that no installed app answers for.
+def _unclaimed_tables(needed_by: Mapping[str, set[str]]) -> list[str] | str:
+    """Tables in the database that no installed app, and not podpack, needs.
 
     The same question `unclaimed()` asks of the data and log roots, asked of the
     one namespace that is shared rather than divided by app name -- and asked of
@@ -170,7 +170,7 @@ def _unclaimed_tables(owners: Mapping[str, str]) -> list[str] | str:
         # once everything is right is no diagnostic.
         db.session.rollback()
         return f"(not reported: {type(exc).__name__})"
-    return sorted(present - set(owners) - {ALEMBIC_VERSION_TABLE})
+    return sorted(present - set(needed_by) - {ALEMBIC_VERSION_TABLE})
 
 
 def _reported(site_app: SiteApp) -> dict[str, object]:
@@ -237,7 +237,7 @@ def status() -> ResponseReturnValue:
         unclaimed={
             "data": unclaimed(state.data_root, state.apps),
             "logs": unclaimed(state.log_root, state.apps),
-            "tables": _unclaimed_tables(state.table_owners),
+            "tables": _unclaimed_tables(state.needed_by),
         },
         apps={
             name: {
@@ -250,10 +250,17 @@ def status() -> ResponseReturnValue:
                 "data_dir_writable": os.access(state.data_root / name, os.W_OK),
                 "log_dir": str(state.log_root / name),
                 "log_dir_writable": os.access(state.log_root / name, os.W_OK),
-                # The one namespace apps share, so the only one where ownership
-                # is worth reporting rather than deriving from the app's name.
-                "tables": sorted(
-                    table for table, owner in state.table_owners.items() if owner == name
+                # The one namespace apps share, so the only one worth
+                # reporting rather than deriving from the app's name. Split
+                # because they answer different questions: what this app would
+                # take with it if uninstalled, and what it would break without.
+                "defines_tables": sorted(
+                    table for table, definer in state.defined_by.items() if definer == name
+                ),
+                "needs_tables": sorted(
+                    table
+                    for table, needers in state.needed_by.items()
+                    if name in needers and state.defined_by.get(table) != name
                 ),
                 "stored_files": sorted(
                     p.name for p in (state.data_root / name).iterdir() if p.is_file()

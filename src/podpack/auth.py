@@ -37,7 +37,7 @@ resolve users the way the rest of flask-security does, so a framework version
 could only be a worse one.
 """
 
-OWNED_TABLES = frozenset({"user", "role", "roles_users"})
+NEEDED_TABLES = frozenset({"user", "role", "roles_users"})
 """The tables this module puts on `db.metadata`.
 
 Recorded because attribution is by *defining module* and podpack is not an

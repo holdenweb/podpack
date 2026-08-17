@@ -90,16 +90,16 @@ class SiteApp:
     the app needs. The site's own config is already loaded by this point, so an
     app can read its section of the host config file here."""
 
-    requires_secrets: frozenset[str] = frozenset()
+    needs_secrets: frozenset[str] = frozenset()
     """Environment variables this app cannot work without.
 
-    Declared here for the same reason `owns_tables` is: the author knows, and
+    Declared here for the same reason `needs_tables` is: the author knows, and
     the site owner installing the app has no way to. Checked at boot with
     podpack's own and the site's, so installing an app that needs a credential
     stops the deployment rather than failing the first time somebody uses the
     feature::
 
-        site_app = SiteApp(blueprint=bp, requires_secrets=frozenset({"MAPS_API_KEY"}))
+        site_app = SiteApp(blueprint=bp, needs_secrets=frozenset({"MAPS_API_KEY"}))
 
     Checked *after* the apps are imported, which is the earliest moment their
     declarations exist -- podpack's own three are checked before anything reads
@@ -110,28 +110,42 @@ class SiteApp:
     not here: naming it here makes the whole site refuse to start.
     """
 
-    owns_tables: frozenset[str] = frozenset()
-    """Table names this app claims deliberately, whatever they are called.
+    defines_tables: frozenset[str] = frozenset()
+    """Tables this app defines that attribution cannot see.
 
-    `db.metadata` is the one namespace podpack does not divide by app name, so
-    an app whose tables its own name does not prefix is warned about: the next
-    app to claim `user` stops a site booting, and the warning reaches the author
-    who can still do something about it. Some names are not the app's to choose
-    -- flask-security's models derive `user` and `role`, and its documentation,
-    its datastore and its own join table all assume them -- so declaring them
-    here says "these are mine on purpose" and the warning stops.
+    Almost always empty, and deliberately so: what an app defines is read from
+    SQLAlchemy's mapper registry, which is a fact rather than a declaration and
+    cannot drift. This is for the one thing that registry does not know about
+    -- a table with no mapped class, such as an association table built with a
+    bare `db.Table`, or one constructed inside a dependency. flask-security's
+    `roles_users` is both, which is how the gap was found::
 
-    It is not merely a mute. A declared name is *recorded* ownership: it reaches
-    `table_owners`, so `/_status` reports which app answers for the table, and a
-    later clash can name the incumbent instead of shrugging. That matters most
-    for a table podpack cannot otherwise see at all -- `roles_users` is built
-    inside flask-security rather than in the site's own module, so nothing
-    attributed it until something said so::
+        association = db.Table("thing_tags", db.Column(...), db.Column(...))
+        site_app = SiteApp(blueprint=bp, defines_tables=frozenset({"thing_tags"}))
 
-        site_app = SiteApp(
-            blueprint=bp,
-            owns_tables=frozenset({"user", "role", "roles_users"}),
-        )
+    Without it, an app in that position declares a need the dependency check
+    cannot satisfy, and the site refuses to start over a table the app itself
+    is sitting on.
+    """
+
+    needs_tables: frozenset[str] = frozenset()
+    """Tables this app reads or writes but does not define.
+
+    An app joining to `user` needs it as genuinely as podpack, which defines
+    it, and several apps may need one table -- so this is a *need*, not a
+    claim, and nothing here says anybody owns anything. What an app defines is
+    read from the mapper registry instead, and needs nothing declared::
+
+        site_app = SiteApp(blueprint=bp, needs_tables=frozenset({"user"}))
+
+    Declaring one has two effects. It stops the unprefixed-name warning for
+    that table, because a name you have said out loud is not the accident that
+    warning is for. And it is checked at boot: a table nothing installed
+    defines is a missing dependency, and the site refuses to start rather than
+    serving until the first query fails.
+
+    `db.metadata` is the one namespace podpack does not divide by app name,
+    which is why any of this needs saying at all.
     """
 
     def healthz(self) -> "Health | None":
@@ -202,11 +216,34 @@ class PodpackState:
     apps: dict[str, SiteApp] = field(default_factory=dict)
     nav: list[Section] = field(default_factory=list)
 
-    table_owners: dict[str, str] = field(default_factory=dict)
-    """Table name to the app that put it on `db.metadata`.
+    defined_by: dict[str, str] = field(default_factory=dict)
+    """Table name to the one app that defines it.
 
-    The one namespace shared across installed apps, so the only one where "which
-    app owns this?" is a question that needs asking. `/_status` reports it.
+    One name and not a set, because SQLAlchemy enforces that already: a second
+    app defining a table another has defined is a boot failure rather than a
+    merge.
+
+    Read from the mapper registry, not deduced from the table's name. The
+    prefix convention keeps names from colliding; it is not a source of truth
+    about who owns them. It is only a warning, so an app may ignore it;
+    prefixes are not unique between apps called `note` and `notes`; and the
+    tables this framework most needed to attribute are `user` and `role`,
+    which are flask-security's names and prefixed by nothing at all.
+    """
+
+    needed_by: dict[str, set[str]] = field(default_factory=dict)
+    """Table name to every app that needs it -- a set, not one name.
+
+    `db.metadata` is the one namespace podpack does not divide by app, so this
+    is the only place "who is involved with this table?" needs asking, and
+    `/_status` reports it.
+
+    A set because sharing is the ordinary case and sole ownership is not: an
+    app that joins to `user` needs it as genuinely as the one that defines it.
+    This was `table_owners`, a `dict[str, str]`, and the second app to declare
+    a table replaced the first in it silently -- which nothing detected,
+    because a single owner was an assumption rather than something anybody had
+    checked.
     """
 
     installed_from: dict[str, str] = field(default_factory=dict)
@@ -242,13 +279,50 @@ def install_apps(app: Flask, names: Iterable[str]) -> None:
         {
             secret: f"app {site_app.name!r}"
             for site_app in state.apps.values()
-            for secret in sorted(site_app.requires_secrets)
+            for secret in sorted(site_app.needs_secrets)
         }
+    )
+    _check_table_dependencies(state)
+
+
+def _check_table_dependencies(state: PodpackState) -> None:
+    """Refuse to start when an app needs a table nothing installed defines.
+
+    A dependency between apps, mediated by the schema rather than by imports:
+    an app that joins to `notes` needs whatever app defines `notes` to be
+    installed too, and the site's `apps` list is where that is decided. Until
+    this check existed the site booted, served every page, and failed at the
+    first query -- a stated requirement nobody was reading.
+
+    Checked against what is *declared*, not against the database. Whether the
+    table has actually been created is alembic's business and `/_status`'s;
+    whether anything even claims to define it is answerable here, at boot,
+    which is far earlier and far cheaper.
+
+    A failure rather than a warning, matching what an unknown app in `apps`
+    already does: a site missing a dependency cannot do what it was configured
+    to do, and saying so quietly would leave it to be discovered by a visitor.
+    """
+    missing = {
+        table: needers
+        for table, needers in state.needed_by.items()
+        if table not in state.defined_by
+    }
+    if not missing:
+        return
+    detail = "; ".join(
+        f"{table!r}, needed by {', '.join(repr(n) for n in sorted(needers))}"
+        for table, needers in sorted(missing.items())
+    )
+    raise RuntimeError(
+        f"this site is missing a table that nothing installed defines: {detail}. "
+        "Either add the app that defines it to `[site] apps`, or stop "
+        "installing the app that needs it."
     )
 
 
 def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
-    site_app = _import_app(module_name, state.table_owners)
+    site_app = _import_app(module_name, state.needed_by, state.defined_by)
     if site_app.name in state.apps:
         raise RuntimeError(
             f"two installed apps share the blueprint name {site_app.name!r}; it "
@@ -353,12 +427,15 @@ def import_app_models(names: Iterable[str]) -> None:
     failure surfaced one service later in `web` -- so the logs blamed the thing
     that was merely next. The check needs no Flask app, so ADR-0010 is untouched.
     """
-    owners: dict[str, str] = {}
+    needed_by: dict[str, set[str]] = {}
+    defined_by: dict[str, str] = {}
     for name in names:
-        _import_app(name, owners)
+        _import_app(name, needed_by, defined_by)
 
 
-def _import_app(module_name: str, table_owners: dict[str, str]) -> SiteApp:
+def _import_app(
+    module_name: str, needed_by: dict[str, set[str]], defined_by: dict[str, str]
+) -> SiteApp:
     """Import an app, check the contract, and record the tables it contributed.
 
     Importing the app *is* model registration: defining a `db.Model` subclass
@@ -378,19 +455,24 @@ def _import_app(module_name: str, table_owners: dict[str, str]) -> SiteApp:
         site_app = _site_app(module_name, module)
         _import_if_present(f"{module_name}.models")
     except InvalidRequestError as exc:
-        raise RuntimeError(_clashing_table(module_name, table_owners, exc)) from exc
+        raise RuntimeError(_clashing_table(module_name, needed_by, exc)) from exc
 
-    # Declared by defining module, plus whatever the app claims outright. The
-    # union matters in both directions: a table built inside a dependency
-    # (flask-security's `roles_users`) is invisible to attribution and reachable
-    # only through the claim, while a table the app defines itself is recorded
-    # whether it thought to claim it or not.
-    for table in sorted(_tables_declared_by(module_name) | site_app.owns_tables):
-        table_owners[table] = site_app.name
-        if table in site_app.owns_tables:
-            # Claimed on purpose, so there is nothing to warn about. The
-            # ownership above is the point of saying so -- this is a
-            # declaration, not a mute.
+    # Two different statements, kept apart. What the app *defines* comes from
+    # the mapper registry and is a fact; what it *needs* is a declaration, and
+    # includes everything it defines, because defining a table is the strongest
+    # possible way of needing it.
+    defines = _tables_declared_by(module_name) | site_app.defines_tables
+    for table in sorted(defines):
+        defined_by[table] = site_app.name
+
+    for table in sorted(defines | site_app.needs_tables):
+        needed_by.setdefault(table, set()).add(site_app.name)
+        if table in site_app.needs_tables:
+            # Declared on purpose, so there is nothing to warn about. Recording
+            # it above is the point of saying so -- this is a declaration, not
+            # a mute, and joining a set rather than replacing a name means a
+            # second app declaring the same table adds to the record instead of
+            # quietly erasing the first.
             continue
         if not table.startswith(site_app.name):
             # Warned here rather than checked at the clash, because the clash
@@ -400,7 +482,7 @@ def _import_app(module_name: str, table_owners: dict[str, str]) -> SiteApp:
                 "app %r declares the table %r, which its own name does not "
                 "prefix. Table names are shared across every installed app, so "
                 "a second app claiming %r will stop a site booting. Name it "
-                "in the app's `owns_tables` if it is deliberate.",
+                "in the app's `needs_tables` if it is deliberate.",
                 site_app.name,
                 table,
                 table,
@@ -457,24 +539,27 @@ def _site_app(module_name: str, module: ModuleType) -> SiteApp:
 
 
 def _clashing_table(
-    module_name: str, table_owners: dict[str, str], exc: InvalidRequestError
+    module_name: str, needed_by: dict[str, set[str]], exc: InvalidRequestError
 ) -> str:
-    """Name both apps in a table-name collision, where SQLAlchemy names neither.
+    """Name every app in a table-name collision, where SQLAlchemy names none.
 
     The table is read out of SQLAlchemy's message because the import that would
     have told us aborted part way through. A miss is survivable -- the apps
-    installed so far and what they claimed is still more than the original error
-    said -- so this reports what it has rather than insisting on a match.
+    installed so far and what they declared is still more than the original
+    error said -- so this reports what it has rather than insisting on a match.
     """
+    def who(names: set[str]) -> str:
+        return ", ".join(repr(name) for name in sorted(names))
+
     match = _ALREADY_DEFINED.search(str(exc))
     table = match.group(1) if match else None
-    if table is not None and table in table_owners:
-        clash = f"the table {table!r}, which {table_owners[table]!r} already claims"
+    if table is not None and table in needed_by:
+        clash = f"the table {table!r}, already needed by {who(needed_by[table])}"
     elif table is not None:
         clash = f"the table {table!r}, which is already on db.metadata"
     else:
-        claimed = ", ".join(f"{t} ({a})" for t, a in sorted(table_owners.items()))
-        clash = f"a table already on db.metadata; claimed so far: {claimed or '(none)'}"
+        declared = ", ".join(f"{t} ({who(a)})" for t, a in sorted(needed_by.items()))
+        clash = f"a table already on db.metadata; declared so far: {declared or '(none)'}"
     return (
         f"installing {module_name!r} failed: it declares {clash}. Table names "
         "are shared across every installed app -- unlike templates, data "

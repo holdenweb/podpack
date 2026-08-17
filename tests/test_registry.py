@@ -669,7 +669,7 @@ def test_a_namespaced_table_name_is_not_warned_about(
     app: Flask, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The teeth on the one above: the fixture app's `widgets` starts with `widget`."""
-    assert app.extensions["podpack"].table_owners["widgets"] == "widget"
+    assert app.extensions["podpack"].needed_by["widgets"] == {"widget"}
     assert "widgets" not in caplog.text
 
 
@@ -711,7 +711,8 @@ def index() -> str:
 site_app = SiteApp(
     blueprint=blueprint,
     url_prefix="/claimer",
-    owns_tables=frozenset({{"claimed_noun_{tag}", "built_elsewhere_{tag}"}}),
+    needs_tables=frozenset({{"claimed_noun_{tag}"}}),
+    defines_tables=frozenset({{"built_elsewhere_{tag}"}}),
 )
 '''
 
@@ -753,9 +754,9 @@ def test_claiming_a_table_records_who_owns_it(
     it. That is the `roles_users` hole, closed.
     """
     app_package("claiming_app_owned", _claiming_app("owned"))
-    owners = _install_only(site, "claiming_app_owned").extensions["podpack"].table_owners
-    assert owners["claimed_noun_owned"] == "claimer_owned"
-    assert owners["built_elsewhere_owned"] == "claimer_owned"
+    needed_by = _install_only(site, "claiming_app_owned").extensions["podpack"].needed_by
+    assert needed_by["claimed_noun_owned"] == {"claimer_owned"}
+    assert needed_by["built_elsewhere_owned"] == {"claimer_owned"}
 
 
 def test_podpack_answers_for_its_own_tables(app: Flask, client: FlaskClient) -> None:
@@ -768,8 +769,8 @@ def test_podpack_answers_for_its_own_tables(app: Flask, client: FlaskClient) -> 
     have it attributed. See ADR-0032, where that hole was first found, and
     ADR-0033, which put these tables here.
     """
-    owners = app.extensions["podpack"].table_owners
-    assert {owners.get(t) for t in ("user", "role", "roles_users")} == {"podpack"}
+    needed_by = app.extensions["podpack"].needed_by
+    assert all(needed_by.get(t) == {"podpack"} for t in ("user", "role", "roles_users"))
 
     unclaimed_tables = client.get("/_status").get_json()["unclaimed"]["tables"]
     assert not {"user", "role", "roles_users"} & set(unclaimed_tables)
@@ -1085,3 +1086,114 @@ def test_healthz_stays_public_but_keeps_an_apps_words_back(
 
     operator = site(admin=lambda: True, host_config=config).test_client().get("/healthz")
     assert "mongodb://box:27017" in operator.get_json()["apps"]["reporter"]["detail"]
+
+
+SHARER = '''
+from flask import Blueprint
+from podpack import SiteApp
+
+blueprint = Blueprint("sharer_TAG", __name__)
+
+
+@blueprint.route("/")
+def index() -> str:
+    return "hi"
+
+
+# Needs the login tables without defining them -- an app that joins to `user`
+# is the ordinary case, and the reason this is a set rather than one name.
+site_app = SiteApp(
+    blueprint=blueprint,
+    url_prefix="/sharer_TAG",
+    needs_tables=frozenset({"user"}),
+)
+'''
+
+
+def test_two_apps_may_need_the_same_table(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """The bug the old name concealed.
+
+    `needs_tables` was `owns_tables` and recorded one owner per table, so the
+    second app to declare `user` replaced the first in the record silently.
+    Nothing detected it, because sole ownership was an assumption rather than
+    anything anybody had checked -- and joining to a table somebody else
+    defines is not a rare case, it is the normal one.
+    """
+    app_package("sharer_one", SHARER.replace("TAG", "one"))
+    app_package("sharer_two", SHARER.replace("TAG", "two"))
+
+    app = site(
+        host_config={
+            "site": {
+                "name": "x",
+                "environment": "test",
+                "apps": ["sharer_one", "sharer_two"],
+            }
+        }
+    )
+
+    # podpack defines them; both apps need them; all three are on the record.
+    assert app.extensions["podpack"].needed_by["user"] == {
+        "podpack",
+        "sharer_one",
+        "sharer_two",
+    }
+
+
+DEPENDENT = '''
+from flask import Blueprint
+from podpack import SiteApp
+
+blueprint = Blueprint("dependent", __name__)
+
+
+@blueprint.route("/")
+def index() -> str:
+    return "hi"
+
+
+# Needs a table no installed app defines, which is a missing dependency.
+site_app = SiteApp(
+    blueprint=blueprint,
+    url_prefix="/dependent",
+    needs_tables=frozenset({"someone_elses_notes"}),
+)
+'''
+
+
+def test_a_table_nothing_defines_is_a_boot_failure(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """A dependency between apps, mediated by the schema rather than imports.
+
+    Before this the site booted, served every page, and failed at the first
+    query -- a stated requirement nobody read. A failure and not a warning,
+    matching what an unknown name in `apps` already does.
+    """
+    app_package("dependent_app", DEPENDENT)
+
+    with pytest.raises(RuntimeError) as caught:
+        site(host_config={"site": {"name": "x", "environment": "test", "apps": ["dependent_app"]}})
+
+    message = str(caught.value)
+    assert "someone_elses_notes" in message
+    assert "dependent" in message          # who needs it
+    assert "[site] apps" in message        # and what to do about it
+
+
+def test_a_need_the_framework_satisfies_is_fine(
+    site: SiteFactory, app_package: Callable[[str, str], str]
+) -> None:
+    """podpack defines the login tables, so needing `user` is satisfiable.
+
+    It is not an installed app, so nothing attributes those tables to it --
+    which is exactly why create_app records them, and why this passes.
+    """
+    app_package("needs_user_app", DEPENDENT.replace("someone_elses_notes", "user")
+                                           .replace('"dependent"', '"needsuser"'))
+
+    app = site(host_config={"site": {"name": "x", "environment": "test", "apps": ["needs_user_app"]}})
+    assert app.extensions["podpack"].defined_by["user"] == "podpack"
+    assert "needsuser" in app.extensions["podpack"].needed_by["user"]

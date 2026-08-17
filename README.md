@@ -62,24 +62,24 @@ healthcheck uses:
 curl -s localhost:8458/healthz
 ```
 
-The richer view is `/_status`, and **the lab cannot show it to you**:
+The richer view is `/_status`, and it answers operators only:
 
 ```bash
-curl -s localhost:8458/_status     # 404, and that is correct
+curl -s localhost:8458/_status     # 404 until you are one
 ```
 
-It answers operators only, an operator is whoever the *site's* `admin`
-predicate says, and the lab's site is podpack itself — which has no login to
-supply one (ADR-0025). So the lab's `/_status` is 404 for everybody,
-permanently. It becomes reachable on a site that wires a login and grants
-somebody the role; see [The first administrator](#the-first-administrator).
+An operator is a member of the `admin` role. Login is podpack's since
+[ADR-0033](https://github.com/holdenweb/podpack/blob/main/adrs/0033-login-is-core.md), so every site can have one — including this lab, which
+before that record could never show this route at all. Three commands make
+you one; see [The first administrator](#the-first-administrator).
 
 The 404 is deliberate — whether a site is a podpack site at all is not worth
 publishing — but it makes a refusal and a missing route look identical, so
-podpack logs the reason at boot:
+podpack says why at boot until somebody holds the role:
 
 ```
-WARNING podpack: no `admin` predicate: /_status will answer 404 to everyone.
+WARNING podpack: no 'admin' role exists, so /_status will answer 404 to
+everyone -- including you. Create it and grant it: ...
 ```
 
 That route reports the config file it read, the commit the image was built from,
@@ -114,7 +114,8 @@ same reason the roots are read from disk: what a site declares and what it has
 are different things, and the gap is the entire point. Alembic's own
 `alembic_version` is excluded, belonging to the migration history rather than to
 any app. A table appearing here that you did *not* expect usually means either a
-retired app or an app that never declared what it owns — see `owns_tables`.
+retired app, or an app that never declared what it needs — see
+`needs_tables`.
 
 Shut down with `podman compose down`, and come back with `podman compose up -d`
 — not `start`; see [Stopping and starting](#stopping-and-starting). Host storage
@@ -147,7 +148,9 @@ site_app = SiteApp(
 | `url_prefix` | Where the app *asks* to be mounted. `None` means the site root, and the site can overrule it — see below. |
 | `nav` | `Section(label, endpoint)` entries contributed to the site's navigation, in installation order. |
 | `init` | Optional `callable(app)`, run before the blueprint is registered, for config keys and services. |
-| `owns_tables` | Table names this app claims deliberately, when its own name does not prefix them. Silences the warning below *by recording ownership*, so `/_status` can report who answers for the table. |
+| `needs_tables` | Tables this app reads or writes but does not define. Several apps may need one table. Checked at boot: a table nothing installed defines is a missing dependency and the site refuses to start. |
+| `defines_tables` | Tables it defines that SQLAlchemy's mapper registry cannot see — an association table built with a bare `db.Table`, say. Almost always empty; what an app defines is otherwise read from the registry, which is a fact rather than a declaration. |
+| `needs_secrets` | Environment variables it cannot run without, checked at boot with podpack's own and the site's. |
 
 Two methods are optional overrides rather than fields, because an app that
 wants them usually wants both and usually has state to consult:
@@ -653,7 +656,7 @@ and an **app**, in its own `SiteApp` — because the author knows what the app
 reads and the site owner installing it has no way to:
 
 ```python
-site_app = SiteApp(blueprint=bp, requires_secrets=frozenset({"MAPS_API_KEY"}))
+site_app = SiteApp(blueprint=bp, needs_secrets=frozenset({"MAPS_API_KEY"}))
 ```
 
 Names in the file or the app, values in the environment — the same split as

@@ -1,6 +1,6 @@
 [project]
 name = "podpack"
-version = "0.5.3"
+version = "0.6.0"
 description = "A framework for building and running web sites out of pluggable apps"
 readme = "README.md"
 license = "MIT"

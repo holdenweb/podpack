@@ -122,12 +122,15 @@ def create_app(
         log_root=Path(log_root or os.environ.get("PODPACK_LOG_ROOT", DEFAULT_LOG_ROOT)),
     )
     # podpack is not an installed app, so attribution by defining module never
-    # reaches its own tables and `/_status` would report all three as answered
-    # for by nobody. Recorded before the apps install, so that an app claiming
-    # `user` collides with the framework rather than silently taking it over.
-    app.extensions["podpack"].table_owners.update(
-        dict.fromkeys(auth.OWNED_TABLES, "podpack")
-    )
+    # reaches its own tables: without this they would be reported as needed by
+    # nobody, and every app declaring `needs_tables={"user"}` would fail the
+    # dependency check against a framework that plainly does define it.
+    # `roles_users` is the sharper case -- flask-security builds it inside
+    # itself, so no mapper attributes it to anything at all.
+    state = app.extensions["podpack"]
+    for table in auth.NEEDED_TABLES:
+        state.defined_by[table] = "podpack"
+        state.needed_by.setdefault(table, set()).add("podpack")
 
     db.init_app(app)
     _add_template_fallback(app)
