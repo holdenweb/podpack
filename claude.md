@@ -480,6 +480,26 @@ Not on this list any more: reconciling the PDF tools, which is done (§5).
   strength of the code reading alone. Where a test asserts a framework
   guarantee, check it fails when the mechanism is disabled — a test that cannot
   fail is not evidence.
+- **A search that finds nothing has two explanations, and the pattern is the
+  first to rule out.** `grep '^MAIL_PASSWORD=' .env` returned nothing and was
+  reported as "`.env` does not define it". The line read `export
+  MAIL_PASSWORD=`, and that false negative went into a diagnosis. An absence
+  is a finding only once the instrument has been shown to work — search
+  loosely first (`grep -i mail`), then narrow.
+- **A name is not an identity.** `@localhost/holdenweb` was reported as the
+  production database. `psql -l` shows a `holdenweb` database on this laptop,
+  next to `holdenweb-orig`. One command would have settled it, and the
+  overstatement was repeated twice before anybody checked.
+- **Two examples are not a convention.** A `test-` prefix in two conftests was
+  described as a house rule while a third file quietly did otherwise. If a
+  pattern is worth asserting it is worth sweeping for — an AST pass over both
+  suites took one command and found the exception.
+
+  These three are one habit wearing three hats: stating a conclusion when the
+  check that would confirm it is seconds away. Take the seconds. State claims
+  at the confidence the evidence carries, and when a claim turns out to be
+  wrong, say so plainly rather than letting the correction ride along inside
+  the next answer.
 - **Run the commands you document.** The README carries about twenty of them,
   and they are as much a claim as anything in the code. `alembic revision
   --autogenerate` sat there for weeks as the documented way to make a migration
