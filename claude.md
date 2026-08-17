@@ -493,5 +493,19 @@ Not on this list any more: reconciling the PDF tools, which is done (§5).
   a superuser session — the reasoning behind read-only mounted config and the
   deliberate breaking of `ALTER SYSTEM`.
 - **Secrets in the environment; everything else in files.**
+- **Test secrets are prefixed `test-`** — `test-secret-key`,
+  `test-password-salt`, `test-mail-password`. Not decoration: the prefix makes
+  a real value pasted into a test obvious on sight, and means nothing in a
+  suite can be mistaken for something needing rotation. The exception is a
+  test *about* the shape of a secret: `test_secrets.py` names its values
+  `a-real-looking-value` precisely to assert that a legitimate secret is not
+  mistaken for an unedited placeholder, and prefixing them would blur what it
+  is claiming.
+
+  A test must also never rely on a secret it did not set itself. Twenty-seven
+  of holdenweb.com's passed for months on a `MAIL_PASSWORD` that
+  `load_dotenv()` was pulling out of a developer's gitignored `.env` — a file
+  the suite never mentions and CI would not have had. Reduce the env file to
+  nothing and the suite should still pass.
 - **Flag concerns, then finish the job.** Prefer being told about a problem
   alongside completed work, rather than being asked about it first.

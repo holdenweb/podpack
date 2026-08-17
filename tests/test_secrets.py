@@ -10,6 +10,11 @@ import pytest
 
 from podpack.config import FRAMEWORK_SECRETS, check_secrets, framework_secrets
 
+# The second element of each mapping entry is a *label* -- who says the
+# secret is needed -- and appears in the failure message. Named so that it
+# cannot be misread as a value.
+NEEDED_BY_THE_SITE = "[site] secrets"
+
 GOOD = {
     "SECRET_KEY": "a-real-looking-value",
     "SQLALCHEMY_DATABASE_URI": "postgresql+psycopg2://u:p@h/db",
@@ -55,12 +60,12 @@ def test_a_site_declares_its_own(configured: None, monkeypatch: pytest.MonkeyPat
     """
     monkeypatch.delenv("MAIL_PASSWORD", raising=False)
     with pytest.raises(RuntimeError, match="MAIL_PASSWORD"):
-        check_secrets({"MAIL_PASSWORD": "the site"})
+        check_secrets({"MAIL_PASSWORD": NEEDED_BY_THE_SITE})
 
 
 def test_a_declared_secret_that_is_set_passes(configured: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAIL_PASSWORD", "sixteen-chars-ok")
-    check_secrets({"MAIL_PASSWORD": "the site"})
+    check_secrets({"MAIL_PASSWORD": NEEDED_BY_THE_SITE})
 
 
 @pytest.mark.parametrize(
