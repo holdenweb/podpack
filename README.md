@@ -1160,6 +1160,45 @@ shared with everything else on it, and moves when the host moves. Keeping the
 container is the same instinct as mounting the config read-only — the version
 belongs to version control rather than to the machine.
 
+## Configuring a host
+
+After cloning onto a host, one command replaces every manual edit:
+
+```bash
+python3 scripts/configure-host.py --port 8461
+```
+
+It writes `.env` and `secrets.env` at mode 0600, keeping every comment from
+the examples, and it settles by construction the things that used to be
+settled by hand:
+
+| | |
+| --- | --- |
+| **secrets** | generated per host, never the examples' lab values |
+| **the database URI** | *built* from `POSTGRES_APP_USER`/`PASSWORD`/`DB`, so those four cannot disagree |
+| **SELinux** | detected from `/sys/fs/selinux/enforce`, setting `VOLUME_RW`/`VOLUME_RO` |
+| **prerequisites** | reports a non-v2 compose provider, a missing podman socket, or lingering being off |
+
+Generated values are `[A-Za-z0-9_-]` and nothing else, deliberately. Each one
+passes through compose's env reader, a shell, a PostgreSQL URI and — inside
+alembic — Python's `configparser`, and every one of those treats some
+punctuation as syntax. A password containing `%` once stopped a deployment
+dead, in `configparser`, before any connection was attempted.
+
+It **refuses to overwrite** an existing `.env` or `secrets.env`. Those carry a
+running site's identity: the salt every stored password is keyed on, and the
+role the database was bootstrapped with. Regenerating them does not
+reconfigure a site, it loses it. `--force` exists for a site with no data yet.
+
+Standard library only, and it imports nothing from podpack — it runs on the
+host's system Python before anything has been installed or built.
+
+Then:
+
+```bash
+./scripts/prepare-host-dirs.sh && ./scripts/up.sh
+```
+
 ## Running on Linux
 
 Two differences on a real Linux host:

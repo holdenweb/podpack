@@ -90,6 +90,17 @@ BASE_MANIFEST: tuple[SubstrateFile, ...] = (
         VERBATIM,
         executable=True,
     ),
+    # Everything this replaces was a manual edit on a live host, and each has
+    # failed at least once: lab secrets left in place, an application password
+    # changed in one of the two places that carry it, SELinux relabelling
+    # forgotten. Python rather than shell because it generates secrets and
+    # rewrites env files, and both are places where shell quoting bites.
+    SubstrateFile(
+        "scripts/configure-host.py",
+        "scripts/configure-host.py",
+        VERBATIM,
+        executable=True,
+    ),
     # The alembic environment is base, not postgres's: `db` and its one
     # history are core to podpack, and ADR-0015 wants moving to a managed
     # PostgreSQL to be a change to one variable and nothing else.

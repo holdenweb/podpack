@@ -13,7 +13,7 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 
 from podpack.migrations import (
     refuse_foreign_autogenerate,
@@ -38,9 +38,25 @@ if config.config_file_name is not None:
 
 # The same environment variable the application itself uses, so alembic and the
 # running site can never disagree about which database they mean.
+#
+# Used directly, and deliberately never handed to `config.set_main_option`.
+# That writes into a configparser, where `%` is the interpolation escape
+# character -- so a perfectly legal password containing one raises
+# `ValueError: invalid interpolation syntax` before any connection is
+# attempted, and the traceback names configparser rather than the password.
+# Measured on a real deployment, where it cost an evening.
+#
+# Doubling the `%` would also work and would leave the trap in place for the
+# next person to call set_main_option. The url never enters the ini instead,
+# which it never needed to: alembic.ini sets no `sqlalchemy.*` options at all,
+# so this was a round trip through a parser purely to read the value back out.
 db_url = os.environ.get("SQLALCHEMY_DATABASE_URI")
-if db_url:
-    config.set_main_option("sqlalchemy.url", db_url)
+if not db_url:
+    raise RuntimeError(
+        "SQLALCHEMY_DATABASE_URI is not set. Migrations read it from the "
+        "environment, as the site does -- compose supplies it from secrets.env, "
+        "and a local run gets it from dev.env via scripts/dev.sh."
+    )
 
 # The same default the application uses in development: the site's config file
 # at its conventional in-repo path. In the container, PODPACK_CONFIG is set and
@@ -50,7 +66,7 @@ target_metadata = _target_metadata(os.environ.get("PODPACK_CONFIG", "config/app.
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=config.get_main_option("sqlalchemy.url"),
+        url=db_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -61,11 +77,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_engine(db_url, poolclass=pool.NullPool)
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
