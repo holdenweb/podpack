@@ -59,6 +59,21 @@ installs; a site that wants none can drop it from both places.
 Path sources are for local work only — see
 [Part 2](#part-2--containerising-it), where they cannot work.
 
+Add one more section while you are here, because the reason only shows up on a
+real host:
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+```
+
+Without it a bare `pytest` walks the whole site, including `hostdata/`.
+PostgreSQL insists its data directory is mode 0700 and `init-postgres` chowns
+it to the container's postgres uid — which under rootless podman is a subuid
+the invoking user cannot read, so collection aborts with `PermissionError`
+before a single test runs. It cannot happen on macOS, where that directory
+belongs to the user running podman machine.
+
 ### 3. Write the factory
 
 ```python
