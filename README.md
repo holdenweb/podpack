@@ -1164,11 +1164,23 @@ belongs to version control rather than to the machine.
 
 Two differences on a real Linux host:
 
-- **SELinux (RHEL, Fedora, CentOS Stream).** Append `,Z` to the read-write bind
-  mounts and `,z` to the read-only ones in [compose.yaml](https://github.com/holdenweb/podpack/blob/main/compose.yaml) — e.g.
-  `${HOST_DATA_DIR}/postgres:/var/lib/postgresql/data:Z`. Without a label,
-  SELinux denies the container access. The mount points are commented in the
-  file.
+- **SELinux (RHEL, AlmaLinux, Fedora, CentOS Stream).** Set both relabel
+  variables in `.env`:
+
+  ```bash
+  VOLUME_RW=:Z
+  VOLUME_RO=,z
+  ```
+
+  Every bind mount interpolates them, so nothing in `compose.yaml` is edited —
+  which matters, because that file is substrate-managed and a hand edit would
+  put the site in conflict on every upgrade for as long as it lives.
+
+  Without them SELinux denies the container access, and the failure misleads:
+  PostgreSQL starts and reports **healthy**, because initdb creates the cluster
+  and the superuser regardless — but `db-init` is unreadable, so the
+  application role and schema are never created, and it is the `migrate`
+  service that fails. Measured on an AlmaLinux host.
 - **Ownership.** `init-storage` handles it, but if you prefer to pre-create the
   directories yourself, `prepare-host-dirs.sh` does the equivalent
   `podman unshare chown` on Linux.

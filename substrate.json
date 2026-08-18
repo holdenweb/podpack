@@ -8,6 +8,8 @@
       "POSTGRES_BIND_ADDR",
       "POSTGRES_HOST_PORT",
       "SITE_NAME",
+      "VOLUME_RO",
+      "VOLUME_RW",
       "WEB_BIND_ADDR",
       "WEB_HOST_PORT"
     ],
@@ -19,6 +21,8 @@
       "POSTGRES_BIND_ADDR",
       "POSTGRES_HOST_PORT",
       "SITE_NAME",
+      "VOLUME_RO",
+      "VOLUME_RW",
       "WEB_BIND_ADDR",
       "WEB_HOST_PORT"
     ],
@@ -85,15 +89,15 @@
     },
     "compose.mongodb.yaml": {
       "class": "verbatim",
-      "sha256": "3414a1104d414f23d3275ba064d5ddd13391a5e28a81b5289715a61db9f76771"
+      "sha256": "a6ab4b980465446a046d131a375209a86015a951adf80ff445c818b9e1c4abd1"
     },
     "compose.postgres.yaml": {
       "class": "verbatim",
-      "sha256": "301c378eccd0003b60e29b80d14628df07ea31c0a7b913517974c8155d440391"
+      "sha256": "7eca502f18bd375e7d4c29f385fee52765ce6e9de45e01dedf3e5e93bfe9c057"
     },
     "compose.yaml": {
       "class": "verbatim",
-      "sha256": "2f779cbb9df609d3725ef4efa3750ac5500e31f9357dc9b310bcbb6dec56d54f"
+      "sha256": "395b2c013bbc3752a3606d29f370dc60dc4972772c7458f1d3fc9e3aeefff3ee"
     },
     "config/mongod.conf": {
       "class": "verbatim",
@@ -154,6 +158,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.5.2",
+  "podpack_version": "0.7.0",
   "substrate_schema": 1
 }

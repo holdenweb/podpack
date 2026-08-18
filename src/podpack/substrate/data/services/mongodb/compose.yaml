@@ -24,9 +24,9 @@ services:
         chown -R 999:999 /mnt/mongo-data /mnt/mongo-configdb /mnt/mongo-logs
         echo "mongodb storage ownership prepared"
     volumes:
-      - ${HOST_DATA_DIR}/mongodb/data:/mnt/mongo-data
-      - ${HOST_DATA_DIR}/mongodb/configdb:/mnt/mongo-configdb
-      - ${HOST_LOG_DIR}/mongodb:/mnt/mongo-logs
+      - ${HOST_DATA_DIR}/mongodb/data:/mnt/mongo-data${VOLUME_RW:-}
+      - ${HOST_DATA_DIR}/mongodb/configdb:/mnt/mongo-configdb${VOLUME_RW:-}
+      - ${HOST_LOG_DIR}/mongodb:/mnt/mongo-logs${VOLUME_RW:-}
 
   mongodb:
     image: docker.io/library/mongo:7
@@ -43,14 +43,13 @@ services:
       - --config
       - /etc/mongo/mongod.conf
     volumes:
-      # Host storage. On SELinux hosts append `,Z` to these and `,z` to the
-      # read-only mount; see README, "Running on Linux".
-      - ${HOST_DATA_DIR}/mongodb/data:/data/db
-      - ${HOST_DATA_DIR}/mongodb/configdb:/data/configdb
-      - ${HOST_LOG_DIR}/mongodb:/var/log/mongodb
-      - ./config/mongod.conf:/etc/mongo/mongod.conf:ro
+      # Host storage; see ${VOLUME_RW}/${VOLUME_RO} in .env for SELinux.
+      - ${HOST_DATA_DIR}/mongodb/data:/data/db${VOLUME_RW:-}
+      - ${HOST_DATA_DIR}/mongodb/configdb:/data/configdb${VOLUME_RW:-}
+      - ${HOST_LOG_DIR}/mongodb:/var/log/mongodb${VOLUME_RW:-}
+      - ./config/mongod.conf:/etc/mongo/mongod.conf:ro${VOLUME_RO:-}
       # First-run bootstrap; runs only while the data directory is empty.
-      - ./mongodb-init:/docker-entrypoint-initdb.d:ro
+      - ./mongodb-init:/docker-entrypoint-initdb.d:ro${VOLUME_RO:-}
     depends_on:
       init-mongodb:
         condition: service_completed_successfully

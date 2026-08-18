@@ -28,8 +28,8 @@ services:
         chown -R 999:999 /mnt/pg-data /mnt/pg-logs
         echo "postgres storage ownership prepared"
     volumes:
-      - ${HOST_DATA_DIR}/postgres:/mnt/pg-data
-      - ${HOST_LOG_DIR}/postgres:/mnt/pg-logs
+      - ${HOST_DATA_DIR}/postgres:/mnt/pg-data${VOLUME_RW:-}
+      - ${HOST_LOG_DIR}/postgres:/mnt/pg-logs${VOLUME_RW:-}
 
   postgres:
     image: docker.io/library/postgres:17
@@ -56,18 +56,17 @@ services:
       - -c
       - config_file=/etc/postgresql/postgresql.conf
     volumes:
-      # Host storage. On SELinux hosts (RHEL/Fedora) append `,Z` to each of
-      # these; on macOS/Windows podman machine the label is unnecessary.
-      - ${HOST_DATA_DIR}/postgres:/var/lib/postgresql/data
-      - ${HOST_LOG_DIR}/postgres:/var/log/postgresql
-      # Host-specific configuration, read-only (append `,z` under SELinux).
+      # Host storage; see ${VOLUME_RW}/${VOLUME_RO} in .env for SELinux.
+      - ${HOST_DATA_DIR}/postgres:/var/lib/postgresql/data${VOLUME_RW:-}
+      - ${HOST_LOG_DIR}/postgres:/var/log/postgresql${VOLUME_RW:-}
+      # Host-specific configuration, read-only.
       # postgresql.conf points hba_file and ident_file at its two companions,
       # so all three must be mounted together.
-      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
-      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
-      - ./config/pg_ident.conf:/etc/postgresql/pg_ident.conf:ro
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro${VOLUME_RO:-}
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro${VOLUME_RO:-}
+      - ./config/pg_ident.conf:/etc/postgresql/pg_ident.conf:ro${VOLUME_RO:-}
       # First-run bootstrap; only runs while the data directory is empty.
-      - ./db-init:/docker-entrypoint-initdb.d:ro
+      - ./db-init:/docker-entrypoint-initdb.d:ro${VOLUME_RO:-}
     depends_on:
       init-postgres:
         condition: service_completed_successfully

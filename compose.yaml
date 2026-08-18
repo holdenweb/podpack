@@ -57,8 +57,8 @@ services:
         chown -R 10001:10001 /mnt/app-data /mnt/app-logs
         echo "app storage ownership prepared"
     volumes:
-      - ${HOST_DATA_DIR}/apps:/mnt/app-data
-      - ${HOST_LOG_DIR}/apps:/mnt/app-logs
+      - ${HOST_DATA_DIR}/apps:/mnt/app-data${VOLUME_RW:-}
+      - ${HOST_LOG_DIR}/apps:/mnt/app-logs${VOLUME_RW:-}
 
   # Schema changes run once, here, rather than from inside the application.
   # gunicorn starts several workers at once, so anything that creates tables at
@@ -90,7 +90,7 @@ services:
       # said it wanted -- a marker a file cannot fake.
       PODPACK_SERVICE_MARKERS: "1"
     volumes:
-      - ./config/app.toml:/etc/holdenweb/app.toml:ro
+      - ./config/app.toml:/etc/holdenweb/app.toml:ro${VOLUME_RO:-}
     command: ["alembic", "upgrade", "head"]
     # No depends_on here: a service's overlay adds its own edge, which is what
     # lets a site run without that service at all.
@@ -120,11 +120,13 @@ services:
       PODPACK_LOG_ROOT: /var/log/holdenweb/apps
       PODPACK_SERVICE_MARKERS: "1"
     volumes:
-      # As above: add `,Z` to the writable mounts and `,z` to the read-only
-      # one on SELinux hosts. See README, "Running on Linux".
-      - ${HOST_DATA_DIR}/apps:/var/lib/holdenweb/apps
-      - ${HOST_LOG_DIR}/apps:/var/log/holdenweb/apps
-      - ./config/app.toml:/etc/holdenweb/app.toml:ro
+      # ${VOLUME_RW}/${VOLUME_RO} carry the SELinux relabel flags on hosts
+      # that need them -- set once in .env, empty everywhere else. They are
+      # variables because the alternative was editing this file by hand,
+      # which puts a substrate-managed file permanently in conflict.
+      - ${HOST_DATA_DIR}/apps:/var/lib/holdenweb/apps${VOLUME_RW:-}
+      - ${HOST_LOG_DIR}/apps:/var/log/holdenweb/apps${VOLUME_RW:-}
+      - ./config/app.toml:/etc/holdenweb/app.toml:ro${VOLUME_RO:-}
     ports:
       # The external port is the one thing a host gets to dictate: Opalstack
       # allocates it to an "Nginx Proxy Port" application and proxies the site
