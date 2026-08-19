@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -53,11 +52,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 
-# `name-version-...whl` and `name-version.tar.gz`: the version is the second
-# hyphen-separated field of a wheel, and what follows the last hyphen before
-# `.tar.gz` in an sdist.
-WHEEL = re.compile(r"^[^-]+-([^-]+)-.*\.whl$")
-SDIST = re.compile(r"^[^-]+-(.+)\.tar\.gz$")
+def artefact_version(filename: str, name: str) -> str | None:
+    """The version a built file claims, or None if it is not one of ours.
+
+    Built from the *name* rather than a general pattern, because a package
+    called `podpack-qrcode` has a hyphen in it and a pattern assuming the first
+    hyphen ends the name would read its version as "qrcode". Distributions
+    normalise the name with underscores in filenames, so both spellings are
+    accepted.
+    """
+    for spelling in {name, name.replace("-", "_")}:
+        if filename.startswith(f"{spelling}-"):
+            rest = filename[len(spelling) + 1:]
+            if rest.endswith(".whl"):
+                return rest.split("-")[0]
+            if rest.endswith(".tar.gz"):
+                return rest[: -len(".tar.gz")]
+    return None
 
 
 def run(*command: str) -> str:
@@ -80,18 +91,25 @@ def hand_over(*command: str) -> int:
     return subprocess.run(command, cwd=ROOT).returncode
 
 
-def declared_version() -> str:
+def declared() -> tuple[str, str]:
+    """This package's name and version, from the file that decides both.
+
+    Read rather than hard-coded so that one identical copy of this script
+    serves every repository in the family. Five diverging copies is how the
+    .dockerignore fix came to be applied by hand three times.
+    """
     with (ROOT / "pyproject.toml").open("rb") as stream:
-        return str(tomllib.load(stream)["project"]["version"])
+        project = tomllib.load(stream)["project"]
+    return str(project["name"]), str(project["version"])
 
 
-def versions_in_dist() -> dict[str, list[str]]:
+def versions_in_dist(name: str) -> dict[str, list[str]]:
     """Every version present, and the files claiming it."""
     found: dict[str, list[str]] = {}
     for path in sorted(DIST.glob("*")):
-        match = WHEEL.match(path.name) or SDIST.match(path.name)
-        if match:
-            found.setdefault(match.group(1), []).append(path.name)
+        version = artefact_version(path.name, name)
+        if version:
+            found.setdefault(version, []).append(path.name)
     return found
 
 
@@ -139,8 +157,7 @@ def main() -> int:
                              "single-version guard exists for")
     args = parser.parse_args()
 
-    version = declared_version()
-    name = "podpack"
+    name, version = declared()
     print(f"publishing {name} {version}")
 
     problems: list[str] = []
@@ -156,7 +173,7 @@ def main() -> int:
     if not DIST.is_dir() or not any(DIST.iterdir()):
         problems.append("dist/ is empty -- nothing to publish")
     else:
-        found = versions_in_dist()
+        found = versions_in_dist(name)
         if len(found) > 1:
             listing = "; ".join(
                 f"{seen}: {', '.join(files)}" for seen, files in sorted(found.items())

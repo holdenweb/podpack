@@ -1,0 +1,69 @@
+# Publish to PyPI when a release tag is pushed.
+#
+# No secret appears in this file and none is configured for it. Authentication
+# is PyPI's trusted publishing: `id-token: write` lets the runner mint a
+# short-lived OIDC token that PyPI exchanges for upload rights, scoped to this
+# repository, this workflow and this environment. A leaked token is not a
+# category of accident that can happen here, because there is no token.
+#
+# The same mechanism creates a project that does not exist yet, through a
+# *pending* publisher registered on PyPI beforehand -- which is why none of
+# these packages ever needs an account-scoped token.
+#
+# Releasing is therefore: bump the version, commit, tag `r<version>`, push the
+# tag. The checks below are the ones tools/publish.py makes from a laptop; a
+# release that cannot pass them should not exist, and finding that out in CI is
+# cheaper than finding it out on an index that never forgets.
+
+name: publish
+
+on:
+  push:
+    tags: ["r*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # The whole of what trusted publishing needs.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: The tag and the package must agree
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#r}"
+          version="$(uv run --no-project python -c '
+          import tomllib, pathlib
+          print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])
+          ')"
+          echo "tag ${tag}, pyproject ${version}"
+          # Pushing r0.8.0 while pyproject says 0.7.3 publishes the wrong
+          # version under the right name, and PyPI keeps whatever it accepts.
+          [ "$tag" = "$version" ] || {
+            echo "::error::tag r${tag} does not match pyproject version ${version}"
+            exit 1
+          }
+
+      - name: Tests
+        # A release that fails its own tests should not exist. Integration
+        # tests need a running site and skip themselves without one.
+        run: uv run pytest -q
+
+      - name: Build
+        # Into a clean checkout, so the single-version problem that guards
+        # tools/publish.py cannot arise here.
+        run: uv build
+
+      - name: Publish
+        # No `with:` block: uv finds the OIDC token through the environment
+        # GitHub provides, and PyPI matches it against the trusted publisher.
+        run: uv publish --trusted-publishing always
