@@ -134,6 +134,36 @@ def fill(example: Path, target: Path, values: dict[str, str]) -> list[str]:
     return seen + unplaced
 
 
+def still_at_example_values(example: Path, target: Path, set_here: list[str]) -> list[str]:
+    """Variables this script did not know about and therefore did not set.
+
+    A site adds its own -- holdenweb.com needs `MAIL_PASSWORD` -- and those
+    keep whatever the example carried, which for a credential is a lab value
+    that will not work and may not look wrong. podpack's boot check catches
+    `CHANGEME` and unsubstituted tokens but cannot know that
+    `lab-only-secret-key` was meant to be replaced, so this says so here, while
+    somebody is looking.
+    """
+    assignment = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
+
+    def values(path: Path) -> dict[str, str]:
+        found = {}
+        for line in path.read_text().splitlines():
+            match = assignment.match(line.strip())
+            if match:
+                found[match.group(1)] = match.group(2)
+        return found
+
+    sample, written = values(example), values(target)
+    return sorted(
+        name for name, value in written.items()
+        if name not in set_here            # what we set is not "left behind",
+        and name in sample                 # even when it equals the example --
+        and value == sample[name]          # 127.0.0.1 is both a sane default
+        and value.strip()                  # and what the example suggests.
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Configure a freshly cloned podpack site on this host.",
@@ -192,7 +222,7 @@ def main() -> int:
     # because the two drifting apart is a genuine failure mode: the role is
     # created once from POSTGRES_APP_USER/PASSWORD at first bootstrap, and the
     # application connects with whatever the URI says.
-    fill(HERE / "secrets.env.example", secrets_env, {
+    wrote = fill(HERE / "secrets.env.example", secrets_env, {
         "POSTGRES_USER": f"{db}_admin",
         "POSTGRES_PASSWORD": generated(),
         "POSTGRES_DB": db,
@@ -209,6 +239,17 @@ def main() -> int:
     print(f"  database      {db}, application role {app_user}")
     print(f"  SELinux       {'detected -- mounts will be relabelled' if relabel else 'not enforcing'}")
     print("  secrets       generated; none printed here, and none of them lab values")
+
+    # Anything this script had no opinion about kept the example's value. For a
+    # site's own credential -- holdenweb.com's MAIL_PASSWORD, say -- that is a
+    # lab value masquerading as a real one. Only secrets.env: a `.env` value
+    # matching the example is usually just a sane default agreeing with itself.
+    left = still_at_example_values(HERE / "secrets.env.example", secrets_env, wrote)
+    if left:
+        print("\n  secrets.env still holds this site's own example values, "
+              "which this script cannot know:")
+        for variable in left:
+            print(f"    {variable}")
 
     problems = check_prerequisites()
     if problems:

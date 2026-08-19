@@ -134,7 +134,7 @@
     },
     "scripts/configure-host.py": {
       "class": "verbatim",
-      "sha256": "9a02c8ada0fcab93e03efc32b6a28e2dd4fee490d15889167d3c33d06fbebf67"
+      "sha256": "dd5fe23bee359c4bc5bd6f45b2a8c13a891fe75617c79514a860e32b89afe202"
     },
     "scripts/dev.sh": {
       "class": "rendered",
