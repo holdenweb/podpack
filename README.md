@@ -754,7 +754,7 @@ Writing one version's files while recording another's would leave the next
 ## Publishing
 
 ```bash
-export UV_PUBLISH_TOKEN=pypi-...
+export UV_PUBLISH_TOKEN=pypi-...        # the project-scoped token, day to day
 python3 tools/publish.py --dry-run
 python3 tools/publish.py
 ```
@@ -763,10 +763,22 @@ The token lives in the environment, never in an argument — arguments are
 visible in `ps`. `uv publish` reads `UV_PUBLISH_TOKEN` itself, so the script
 never handles the value.
 
-**Scope the token to this project**, which PyPI offers once the project exists;
-a first upload needs an account-scoped token you then revoke. On CI, trusted
-publishing avoids tokens entirely — pass `--assume-credentials`, since keyring
-and OIDC cannot be detected from here.
+**Scope the token to this project.** PyPI offers a project scope only for a
+project that already exists, so the *first* upload needs an account-scoped
+token — which is a good reason for the environment rather than a config file,
+because it can be supplied for that one command and never become the default:
+
+```bash
+UV_PUBLISH_TOKEN=pypi-account-scoped python3 tools/publish.py
+```
+
+Then create a project-scoped token, revoke the account-scoped one, and export
+the narrow one for everything after. (An inline assignment lands in shell
+history; prefix the line with a space if your shell is set to ignore those, or
+revoke the broad token straight afterwards — which you are doing anyway.)
+
+On CI, trusted publishing avoids tokens entirely — pass `--assume-credentials`,
+since keyring and OIDC cannot be detected from here.
 
 It builds into a clean `dist/` and refuses to upload unless exactly one version
 is present there, that version matches `pyproject.toml`, the working tree is
