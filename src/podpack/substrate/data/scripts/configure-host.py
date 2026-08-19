@@ -43,6 +43,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 
+# Names that carry a credential, so that "same as the example" is a finding
+# rather than a coincidence. A password left at a lab value fails to
+# authenticate; a bind address left at 127.0.0.1 is simply correct.
+CREDENTIAL = re.compile(r"(PASSWORD|SECRET|SALT|TOKEN|_KEY|URI)", re.I)
+
+
 # token_urlsafe yields [A-Za-z0-9_-] and nothing else, which is the point.
 #
 # Every generated value passes through at least four parsers -- compose's .env
@@ -164,14 +170,83 @@ def still_at_example_values(example: Path, target: Path, set_here: list[str]) ->
     )
 
 
+def report_example_values(env: Path, secrets_env: Path, set_here: dict[Path, list[str]]) -> bool:
+    """Say which variables still hold whatever the example suggested.
+
+    Run after writing, and on demand against files written long ago -- which is
+    the case that matters, because a deployed site is exactly the one whose
+    secrets.env this script refuses to touch. `--check` exists for it.
+
+    A value equal to the example is not necessarily wrong: a lab is *meant* to
+    run on lab credentials, and 127.0.0.1 is both a sane default and what the
+    example suggests. So this reports rather than judges, and leaves the
+    exit code to the caller.
+    """
+    credentials, others = [], []
+    for target, example in ((secrets_env, "secrets.env.example"), (env, ".env.example")):
+        if not target.exists():
+            continue
+        for variable in still_at_example_values(HERE / example, target, set_here.get(target, [])):
+            (credentials if CREDENTIAL.search(variable) else others).append(
+                f"{variable} ({target.name})"
+            )
+
+    if credentials:
+        print("\n  still the example's value, and needs changing:")
+        for entry in credentials:
+            print(f"    {entry}")
+    if others:
+        # Reported without alarm. A port, a worker count or a bind address
+        # equal to the example is the example agreeing with a sane default,
+        # not something anybody forgot.
+        print(f"\n  unchanged from the example, which is usually fine: "
+              f"{', '.join(e.split(' ')[0] for e in others)}")
+    return bool(credentials)
+
+
+def check(env: Path, secrets_env: Path) -> int:
+    """Inspect an existing configuration without writing anything."""
+    missing = [p.name for p in (env, secrets_env) if not p.exists()]
+    if missing:
+        print(f"not configured yet: {', '.join(missing)} missing", file=sys.stderr)
+        print("  run this script without --check to create them", file=sys.stderr)
+        return 1
+
+    print(f"checking {env.name} and {secrets_env.name} in {HERE}")
+    # Nothing was set by this run, so every variable is compared.
+    unedited = report_example_values(env, secrets_env, {})
+    if not unedited:
+        # Not "every value differs" -- plenty legitimately do not, and saying
+        # so would be false. What matters is that no *credential* is still the
+        # example's.
+        print("  no credential is still at its example value")
+
+    problems = check_prerequisites()
+    if problems:
+        print("\n  this host is not ready to run containers:")
+        for problem in problems:
+            print(f"    - {problem}")
+
+    if unedited or problems:
+        print("\nsomething above needs attention.")
+        return 1
+    print("\nnothing to report.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Configure a freshly cloned podpack site on this host.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__.split("Run it once")[1].split("Standard library")[0].strip(),
     )
-    parser.add_argument("--port", type=int, required=True,
-                        help="the port this host allocated for the site")
+    parser.add_argument("--port", type=int,
+                        help="the port this host allocated for the site "
+                             "(required unless --check)")
+    parser.add_argument("--check", action="store_true",
+                        help="inspect the existing configuration and write "
+                             "nothing: which values are still the example's, "
+                             "and whether this host can run containers")
     parser.add_argument("--site-name", default=HERE.name,
                         help="compose project and image name (default: this directory)")
     parser.add_argument("--data-dir", default="./hostdata")
@@ -187,6 +262,11 @@ def main() -> int:
     args = parser.parse_args()
 
     env, secrets_env = HERE / ".env", HERE / "secrets.env"
+
+    if args.check:
+        return check(env, secrets_env)
+    if args.port is None:
+        parser.error("--port is required (or use --check to inspect what exists)")
     existing = [p.name for p in (env, secrets_env) if p.exists()]
     if existing and not args.force:
         print(f"refusing to overwrite: {', '.join(existing)}", file=sys.stderr)
@@ -197,13 +277,16 @@ def main() -> int:
             "  loses it. Use --force only on a site with no data yet.",
             file=sys.stderr,
         )
+        print("\n  Nothing was changed. What is there now:", file=sys.stderr)
+        report_example_values(env, secrets_env, {})
+        print("\n  `--check` reports this without the refusal.", file=sys.stderr)
         return 1
 
     db = args.db_name or re.sub(r"[^a-z0-9_]", "_", args.site_name.lower())
     app_user, app_password = f"{db}_app", generated()
     relabel = selinux_is_enforcing()
 
-    fill(HERE / ".env.example", env, {
+    wrote_env = fill(HERE / ".env.example", env, {
         "SITE_NAME": args.site_name,
         "HOST_DATA_DIR": args.data_dir,
         "HOST_LOG_DIR": args.log_dir,
@@ -242,14 +325,8 @@ def main() -> int:
 
     # Anything this script had no opinion about kept the example's value. For a
     # site's own credential -- holdenweb.com's MAIL_PASSWORD, say -- that is a
-    # lab value masquerading as a real one. Only secrets.env: a `.env` value
-    # matching the example is usually just a sane default agreeing with itself.
-    left = still_at_example_values(HERE / "secrets.env.example", secrets_env, wrote)
-    if left:
-        print("\n  secrets.env still holds this site's own example values, "
-              "which this script cannot know:")
-        for variable in left:
-            print(f"    {variable}")
+    # lab value masquerading as a real one.
+    report_example_values(env, secrets_env, {secrets_env: wrote, env: wrote_env})
 
     problems = check_prerequisites()
     if problems:

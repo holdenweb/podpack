@@ -134,7 +134,7 @@
     },
     "scripts/configure-host.py": {
       "class": "verbatim",
-      "sha256": "dd5fe23bee359c4bc5bd6f45b2a8c13a891fe75617c79514a860e32b89afe202"
+      "sha256": "65204754991225ee9b164a78db347e3764a58ebd0aa62d180da21709e382d211"
     },
     "scripts/dev.sh": {
       "class": "rendered",
@@ -162,6 +162,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.7.1",
+  "podpack_version": "0.7.3",
   "substrate_schema": 1
 }
