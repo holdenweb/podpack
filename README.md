@@ -720,6 +720,53 @@ afternoon once.
 A site with an unusual idea of who counts as an operator can still pass its
 own `create_app(admin=…)`; the default is a default, not a fixture.
 
+## Where the substrate comes from
+
+`podpack substrate upgrade` reads its files from the podpack **installed in
+this site's environment**, whatever its provenance — a PyPI wheel, a git rev, a
+sibling checkout. Distribution policy and the substrate mechanism are
+independent, so pinning a site to an unreleased commit and upgrading from it
+works exactly as upgrading from a release does.
+
+To apply a version you have *not* installed, name the artefact:
+
+```bash
+podpack substrate status  --from dist/podpack-0.9.0-py3-none-any.whl
+podpack substrate diff    --from dist/podpack-0.9.0-py3-none-any.whl
+podpack substrate upgrade --from dist/podpack-0.9.0-py3-none-any.whl
+```
+
+A wheel, an sdist, or a checkout directory. The wheel is read **in place** —
+the engine asks a root only for `root / name`, `.is_file()` and
+`.read_bytes()`, and `zipfile.Path` provides all three — so nothing is
+extracted and nothing is installed.
+
+Installing the wheel first is not equivalent, which is why this exists.
+`uv run` re-syncs the environment from the lockfile before running, so a
+`uv pip install` of a local wheel is undone before the command meant to use it:
+install 0.8.0 over a lockfile pinning 0.7.3, run `uv run podpack --version`,
+and you get 0.7.3 with only an `Uninstalled 1 package` line to say so.
+
+`substrate.json` records the **artefact's** version, not the installed one.
+Writing one version's files while recording another's would leave the next
+`status` comparing against the wrong thing.
+
+## Publishing
+
+```bash
+python3 tools/publish.py --dry-run
+python3 tools/publish.py
+```
+
+It builds into a clean `dist/` and refuses to upload unless exactly one version
+is present there, that version matches `pyproject.toml`, the working tree is
+clean, the `r<version>` tag exists, and the version is not already on PyPI.
+
+The single-version guard is the one worth knowing about: `uv publish` uploads
+`dist/*`, that directory accumulates, and this repository sat with
+`podpack-0.4.0` in `dist/` while `pyproject.toml` said 0.7.3. Publishing then
+would have shipped 0.4.0, and PyPI does not let you take a version back.
+
 ## Getting it, and keeping it current
 
 The substrate ships inside the podpack package, and a site installs it with

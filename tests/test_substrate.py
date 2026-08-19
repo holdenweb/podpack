@@ -11,6 +11,8 @@ import json
 import os
 import shutil
 import stat
+import zipfile
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -359,8 +361,12 @@ def test_a_symlinked_parent_directory_cannot_be_written_through(
     (site / "scripts").symlink_to(shared)
     (upstream / "scripts" / "up.sh").write_text("# newer upstream\n")
 
-    for flags in ({}, {"take_upstream": {"scripts/up.sh"}}):
-        actions, state, conflicts = plan_upgrade(site, state_of(site), upstream, **flags)
+    # Named rather than splatted: `plan_upgrade` grew a keyword-only `version`,
+    # and a `**dict[str, set[str]]` could in principle land on it.
+    for take_upstream in (set(), {"scripts/up.sh"}):
+        actions, state, conflicts = plan_upgrade(
+            site, state_of(site), upstream, take_upstream=take_upstream
+        )
         substrate.apply(actions, site)
         assert verbs(actions)["scripts/up.sh"] == "not managed here"
 
@@ -907,3 +913,82 @@ def test_every_manifest_source_ships_in_a_built_wheel(tmp_path: Path) -> None:
     for entry in MANIFEST:
         assert f"podpack/substrate/data/{entry.source}" in shipped, entry.source
     assert "podpack/py.typed" in shipped
+
+
+def _wheel_of(tmp_path: Path, version: str) -> Path:
+    """A wheel carrying the current substrate under a chosen version.
+
+    Built by hand rather than by `uv build`, so the test needs no network, no
+    build backend and no subprocess -- and so that the version can be anything,
+    which is the whole point of what it is used to check.
+    """
+    wheel = tmp_path / f"podpack-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for path in DATA_ROOT.rglob("*"):
+            if path.is_file():
+                archive.write(
+                    path, f"podpack/substrate/data/{path.relative_to(DATA_ROOT)}"
+                )
+        archive.writestr(
+            f"podpack-{version}.dist-info/METADATA",
+            f"Metadata-Version: 2.1\nName: podpack\nVersion: {version}\n",
+        )
+    return wheel
+
+
+def test_a_substrate_can_be_read_from_a_wheel(tmp_path: Path) -> None:
+    """Applying a version you have not installed.
+
+    Installing it first looks equivalent and is not: `uv run` re-syncs from the
+    lockfile before running, so a `uv pip install` of a local wheel is undone
+    before the command meant to use it. Measured -- 0.8.0 installed over a
+    lockfile pinning 0.7.3 reports 0.7.3.
+    """
+    wheel = _wheel_of(tmp_path, "9.9.9")
+
+    with ExitStack() as stack:
+        artefact = substrate.source_root_from(wheel, stack)
+        assert artefact.version == "9.9.9"
+        # Read in place: a wheel is a zip, and zipfile.Path satisfies every
+        # operation the engine performs on a root.
+        assert (artefact.root / "compose.yaml").is_file()
+        assert (artefact.root / "compose.yaml").read_bytes() == (
+            DATA_ROOT / "compose.yaml"
+        ).read_bytes()
+
+
+def test_applying_from_an_artefact_records_the_artefacts_version(
+    site: Path, tmp_path: Path
+) -> None:
+    """The quiet lie this exists to prevent.
+
+    `plan_upgrade` defaults to `podpack_version()`, the *installed*
+    distribution. Applying a wheel would otherwise write that wheel's files
+    while recording the installed version, so `substrate.json` would describe a
+    state that never existed and the next `status` would compare against the
+    wrong thing.
+    """
+    initialise(site)
+    state = state_of(site)
+    wheel = _wheel_of(tmp_path, "9.9.9")
+
+    with ExitStack() as stack:
+        artefact = substrate.source_root_from(wheel, stack)
+        _, updated, _ = substrate.plan_upgrade(
+            site, state, artefact.root, version=artefact.version
+        )
+
+    assert updated.podpack_version == "9.9.9"
+    assert updated.podpack_version != substrate.podpack_version()
+
+
+def test_an_artefact_that_carries_no_substrate_is_refused(tmp_path: Path) -> None:
+    """A wheel for some other package, or a corrupt one -- named plainly rather
+    than failing later on a missing file."""
+    empty = tmp_path / "notpodpack-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(empty, "w") as archive:
+        archive.writestr("notpodpack/__init__.py", "")
+
+    with ExitStack() as stack:
+        with pytest.raises(RuntimeError, match="no podpack substrate"):
+            substrate.source_root_from(empty, stack)

@@ -27,12 +27,16 @@ import hashlib
 import json
 import os
 import re
+import tarfile
+import tempfile
+import zipfile
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from importlib.metadata import version as _distribution_version
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from podpack import services
 
@@ -395,6 +399,97 @@ def source_root() -> Traversable | Path:
     return files("podpack.substrate") / "data"
 
 
+class Artefact(NamedTuple):
+    """A substrate to apply, and the version that produced it."""
+
+    root: Traversable | Path
+    version: str
+
+
+def source_root_from(artefact: Path, stack: ExitStack) -> Artefact:
+    """Read a substrate out of a wheel, an sdist or a checkout.
+
+    The point is to apply a version you have *not* installed. Installing it
+    first looks equivalent and is not: `uv run` re-syncs the environment from
+    the lockfile before running, so a `uv pip install` of a local wheel is
+    silently undone before the command that was supposed to use it. Measured --
+    installing 0.8.0 over a lockfile pinning 0.7.3 and running `uv run podpack`
+    reports 0.7.3, with only an `Uninstalled 1 package` line to say so.
+
+    A wheel is read in place. The engine asks a root for exactly three things
+    -- `root / name`, `.is_file()` and `.read_bytes()` -- and `zipfile.Path`
+    provides all three, so there is nothing to extract. An sdist is a tarball,
+    which offers no such view, so that one is unpacked into a temporary
+    directory owned by `stack`.
+
+    The version comes from the artefact rather than from the installed
+    distribution, because it is what gets recorded in `substrate.json`: writing
+    one version's files while recording another's is the kind of quiet lie that
+    makes the next `status` compare against the wrong thing.
+    """
+    if not artefact.exists():
+        raise RuntimeError(f"no such artefact: {artefact}")
+
+    if artefact.is_dir():
+        checkout = artefact / "src" / "podpack" / "substrate" / "data"
+        if not (checkout / "compose.yaml").is_file():
+            raise RuntimeError(
+                f"{artefact} does not look like a podpack checkout: expected "
+                f"{checkout.relative_to(artefact)} to exist"
+            )
+        return Artefact(checkout, _version_from_pyproject(artefact / "pyproject.toml"))
+
+    if artefact.suffix == ".whl":
+        archive = stack.enter_context(zipfile.ZipFile(artefact))
+        inside = zipfile.Path(archive) / "podpack" / "substrate" / "data"
+        if not (inside / "compose.yaml").is_file():
+            raise RuntimeError(f"{artefact.name} carries no podpack substrate")
+        return Artefact(inside, _version_from_wheel(archive, artefact))
+
+    if artefact.name.endswith(".tar.gz"):
+        unpacked = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        with tarfile.open(artefact) as tar:
+            tar.extractall(unpacked, filter="data")
+        inner = next(unpacked.iterdir())          # sdists carry one top directory
+        unpacked_root = inner / "src" / "podpack" / "substrate" / "data"
+        if not (unpacked_root / "compose.yaml").is_file():
+            raise RuntimeError(f"{artefact.name} carries no podpack substrate")
+        return Artefact(unpacked_root, _version_from_pkg_info(inner / "PKG-INFO"))
+
+    raise RuntimeError(
+        f"cannot read a substrate from {artefact.name}: expected a .whl, a "
+        ".tar.gz, or a checkout directory"
+    )
+
+
+def _version_from_wheel(archive: zipfile.ZipFile, artefact: Path) -> str:
+    """The wheel's own metadata, falling back to its filename.
+
+    The filename is normative for a wheel -- `name-version-...whl` -- so the
+    fallback is not a guess, it is the other place the same fact is written.
+    """
+    for name in archive.namelist():
+        if name.endswith(".dist-info/METADATA"):
+            for line in archive.read(name).decode().splitlines():
+                if line.startswith("Version:"):
+                    return line.split(":", 1)[1].strip()
+    return artefact.name.split("-")[1]
+
+
+def _version_from_pkg_info(path: Path) -> str:
+    for line in path.read_text().splitlines():
+        if line.startswith("Version:"):
+            return line.split(":", 1)[1].strip()
+    raise RuntimeError(f"no Version in {path}")
+
+
+def _version_from_pyproject(path: Path) -> str:
+    for line in path.read_text().splitlines():
+        if line.startswith("version"):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"no version in {path}")
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -600,6 +695,8 @@ def plan_upgrade(
     root: Traversable | Path,
     take_upstream: set[str] | None = None,
     keep: set[str] | None = None,
+    *,
+    version: str | None = None,
 ) -> tuple[list[Action], State, int]:
     """Three-way sync per managed file; append-only delivery for config.
 
@@ -616,7 +713,9 @@ def plan_upgrade(
     example_delivered = set(state.delivered_vars.get(".env.example", []))
     actions: list[Action] = []
     conflicts = 0
-    new_version = podpack_version()
+    # The artefact's version when applying from one, so substrate.json
+    # records what actually wrote these files.
+    new_version = version or podpack_version()
 
     for entry in MANIFEST:
         target = site_dir / entry.target

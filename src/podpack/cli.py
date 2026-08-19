@@ -16,6 +16,7 @@ and `roles add` do it well already.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import difflib
 import re
 import sys
@@ -107,6 +108,11 @@ def _build_parser() -> argparse.ArgumentParser:
     init.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
 
     upgrade = actions.add_parser("upgrade", help="bring the substrate up to the installed podpack")
+    upgrade.add_argument(
+        "--from", dest="artefact", metavar="ARTEFACT",
+        help="read the substrate from a wheel, sdist or checkout instead of "
+             "the installed podpack -- for a version you have not installed",
+    )
     upgrade.add_argument("--dir", default=".", help="site directory (default: .)")
     upgrade.add_argument("--dry-run", action="store_true", help="report without writing")
     upgrade.add_argument("--take-upstream", action="append", default=[], metavar="PATH",
@@ -117,6 +123,11 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="resolve a conflict by keeping the site's PATH as-is")
 
     stat = actions.add_parser("status", help="report every substrate file's state")
+    stat.add_argument(
+        "--from", dest="artefact", metavar="ARTEFACT",
+        help="read the substrate from a wheel, sdist or checkout instead of "
+             "the installed podpack -- for a version you have not installed",
+    )
     stat.add_argument("--dir", default=".", help="site directory (default: .)")
     stat.add_argument("--check", action="store_true",
                       help="exit 1 if an upgrade would write or conflict")
@@ -140,6 +151,11 @@ def _build_parser() -> argparse.ArgumentParser:
     svc.add_argument("--dry-run", action="store_true", help="report without writing")
 
     diff = actions.add_parser("diff", help="diff substrate files against the installed version")
+    diff.add_argument(
+        "--from", dest="artefact", metavar="ARTEFACT",
+        help="read the substrate from a wheel, sdist or checkout instead of "
+             "the installed podpack -- for a version you have not installed",
+    )
     diff.add_argument("--dir", default=".", help="site directory (default: .)")
     diff.add_argument("paths", nargs="*", help="targets to diff (default: all that differ)")
 
@@ -262,6 +278,20 @@ def _unknown_targets(paths: list[str]) -> list[str]:
     return sorted(set(paths) - managed)
 
 
+def _substrate_source(args: argparse.Namespace, stack: ExitStack) -> substrate.Artefact:
+    """The substrate to work from: an artefact if asked for, else the installed one.
+
+    Announced when it is an artefact, because a command that silently applied
+    something other than the installed version would be indistinguishable from
+    one that did what you expected.
+    """
+    if not getattr(args, "artefact", None):
+        return substrate.Artefact(substrate.source_root(), substrate.podpack_version())
+    found = substrate.source_root_from(Path(args.artefact), stack)
+    print(f"reading the substrate from {args.artefact} ({found.version})")
+    return found
+
+
 def _upgrade(args: argparse.Namespace) -> int:
     site_dir = _site_dir(args)
     state = _load_or_complain(site_dir)
@@ -283,19 +313,22 @@ def _upgrade(args: argparse.Namespace) -> int:
             if entry.kind in substrate.MANAGED_KINDS
         ))
         return 2
-    actions, state, conflicts = substrate.plan_upgrade(
-        site_dir,
-        state,
-        substrate.source_root(),
-        take_upstream=set(args.take_upstream),
-        keep=set(args.keep),
-    )
-    _report([a for a in actions if a.verb != "ok"])
-    if args.dry_run:
-        print("(dry run: nothing written)")
-        return 1 if conflicts else 0
-    substrate.apply(actions, site_dir)
-    state.save(site_dir)
+    with ExitStack() as stack:
+        source = _substrate_source(args, stack)
+        actions, state, conflicts = substrate.plan_upgrade(
+            site_dir,
+            state,
+            source.root,
+            take_upstream=set(args.take_upstream),
+            keep=set(args.keep),
+            version=source.version,
+        )
+        _report([a for a in actions if a.verb != "ok"])
+        if args.dry_run:
+            print("(dry run: nothing written)")
+            return 1 if conflicts else 0
+        substrate.apply(actions, site_dir)
+        state.save(site_dir)
     if conflicts:
         print(f"{conflicts} conflict(s): the .new files hold podpack's version; "
               "resolve each with --take-upstream PATH or --keep PATH")
@@ -308,10 +341,14 @@ def _status(args: argparse.Namespace) -> int:
     state = _load_or_complain(site_dir)
     if state is None:
         return 2
-    lines, pending = substrate.status(site_dir, state, substrate.source_root())
-    installed = substrate.podpack_version()
+    with ExitStack() as stack:
+        source = _substrate_source(args, stack)
+        lines, pending = substrate.status(site_dir, state, source.root)
+    # `source.version` rather than the installed one: with --from they differ,
+    # and reporting the installed version would describe a comparison that did
+    # not happen.
     print(f"substrate recorded at podpack {state.podpack_version}; "
-          f"installed podpack is {installed}")
+          f"compared against {source.version}")
     for line in lines:
         print(f"  {line}")
     if args.check and pending:
@@ -382,7 +419,11 @@ def _services(args: argparse.Namespace) -> int:
 
     # The new service's own variables arrive by the ordinary delivery rule --
     # its fragment is part of this site's canon from now on.
-    actions, state, conflicts = substrate.plan_upgrade(site_dir, state, substrate.source_root())
+    with ExitStack() as stack:
+        source = _substrate_source(args, stack)
+        actions, state, conflicts = substrate.plan_upgrade(
+            site_dir, state, source.root, version=source.version
+        )
     substrate.apply(actions, site_dir)
     state.save(site_dir)
     _report([a for a in actions if a.verb not in ("ok", "locally edited (kept)")])
@@ -411,21 +452,25 @@ def _diff(args: argparse.Namespace) -> int:
         print("not substrate files: " + ", ".join(unknown))
         return 2
     targets = args.paths or [entry.target for entry in substrate.MANIFEST]
-    for entry in substrate.MANIFEST:
-        if entry.target not in targets:
-            continue
-        rendered = substrate.render(entry, params, substrate.source_root())
-        target = site_dir / entry.target
-        disk = target.read_bytes() if target.exists() else b""
-        if disk == rendered:
-            continue
-        diff = difflib.unified_diff(
-            rendered.decode("utf-8", errors="replace").splitlines(keepends=True),
-            disk.decode("utf-8", errors="replace").splitlines(keepends=True),
-            fromfile=f"podpack {substrate.podpack_version()}: {entry.target}",
-            tofile=f"site: {entry.target}",
-        )
-        sys.stdout.writelines(diff)
+    with ExitStack() as stack:
+        source = _substrate_source(args, stack)
+        for entry in substrate.MANIFEST:
+            if entry.target not in targets:
+                continue
+            rendered = substrate.render(entry, params, source.root)
+            target = site_dir / entry.target
+            disk = target.read_bytes() if target.exists() else b""
+            if disk == rendered:
+                continue
+            diff = difflib.unified_diff(
+                rendered.decode("utf-8", errors="replace").splitlines(keepends=True),
+                disk.decode("utf-8", errors="replace").splitlines(keepends=True),
+                # The version actually being compared against, which is not the
+                # installed one when --from names an artefact.
+                fromfile=f"podpack {source.version}: {entry.target}",
+                tofile=f"site: {entry.target}",
+            )
+            sys.stdout.writelines(diff)
     return 0
 
 
