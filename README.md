@@ -754,9 +754,19 @@ Writing one version's files while recording another's would leave the next
 ## Publishing
 
 ```bash
+export UV_PUBLISH_TOKEN=pypi-...
 python3 tools/publish.py --dry-run
 python3 tools/publish.py
 ```
+
+The token lives in the environment, never in an argument — arguments are
+visible in `ps`. `uv publish` reads `UV_PUBLISH_TOKEN` itself, so the script
+never handles the value.
+
+**Scope the token to this project**, which PyPI offers once the project exists;
+a first upload needs an account-scoped token you then revoke. On CI, trusted
+publishing avoids tokens entirely — pass `--assume-credentials`, since keyring
+and OIDC cannot be detected from here.
 
 It builds into a clean `dist/` and refuses to upload unless exactly one version
 is present there, that version matches `pyproject.toml`, the working tree is

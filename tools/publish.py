@@ -23,13 +23,24 @@ Not in `scripts/`: that holds only what `podpack substrate` manages, and this
 is repo tooling. Apps can copy it; nothing here is podpack-specific beyond the
 tag convention.
 
+    export UV_PUBLISH_TOKEN=pypi-...
     python3 tools/publish.py --dry-run     # every check, no upload
     python3 tools/publish.py
+
+The token goes in the environment rather than an argument, because arguments
+are visible in `ps` to everyone on the machine. `uv publish` reads
+UV_PUBLISH_TOKEN itself, so nothing here ever handles the value.
+
+It does not prompt, incidentally -- it attempts trusted publishing, fails,
+builds, hashes the wheel, and only then reports "Missing credentials" behind a
+stack of OIDC connection errors. Hence the credential check below, which is
+about arriving at that news sooner and in one line.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -50,10 +61,23 @@ SDIST = re.compile(r"^[^-]+-(.+)\.tar\.gz$")
 
 
 def run(*command: str) -> str:
+    """Run a command and return its output, for the checks."""
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"{' '.join(command)} failed:\n{result.stderr.strip()}")
     return result.stdout.strip()
+
+
+def hand_over(*command: str) -> int:
+    """Run a command on *this* terminal, and do not capture a thing.
+
+    `uv publish` asks for credentials when no token is configured, and a prompt
+    written to a captured pipe is a prompt nobody can see or answer: the
+    command appears to hang, and the reason is invisible by construction. So
+    stdin, stdout and stderr are inherited, which is the whole difference
+    between this and `run`.
+    """
+    return subprocess.run(command, cwd=ROOT).returncode
 
 
 def declared_version() -> str:
@@ -89,10 +113,27 @@ def already_on_pypi(name: str, version: str) -> bool:
         return False
 
 
+def credential_configured() -> bool:
+    """Whether `uv publish` has something to authenticate with.
+
+    Only the environment is inspected. uv also accepts a keyring and trusted
+    publishing, neither of which can be detected cheaply or reliably from
+    here -- hence `--assume-credentials` rather than a guess that would refuse
+    a perfectly good CI run.
+    """
+    return bool(
+        os.environ.get("UV_PUBLISH_TOKEN")
+        or (os.environ.get("UV_PUBLISH_USERNAME") and os.environ.get("UV_PUBLISH_PASSWORD"))
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true",
                         help="run every check and stop before uploading")
+    parser.add_argument("--assume-credentials", action="store_true",
+                        help="skip the credential check -- for keyring or "
+                             "trusted publishing, which cannot be detected here")
     parser.add_argument("--no-build", action="store_true",
                         help="publish what is already in dist/ -- the case the "
                              "single-version guard exists for")
@@ -110,7 +151,7 @@ def main() -> int:
         if DIST.exists():
             shutil.rmtree(DIST)
         print("  building into a clean dist/")
-        run("uv", "build")
+        run("uv", "build")          # not interactive; output is noise
 
     if not DIST.is_dir() or not any(DIST.iterdir()):
         problems.append("dist/ is empty -- nothing to publish")
@@ -140,6 +181,23 @@ def main() -> int:
     if already_on_pypi(name, version):
         problems.append(f"{name} {version} is already on PyPI, and versions are final")
 
+    if not args.assume_credentials and not credential_configured():
+        # Checked here rather than left to uv, which tries trusted publishing,
+        # fails, builds, hashes the whole wheel and only then says "Missing
+        # credentials" -- by which point the interesting line has scrolled off
+        # behind a stack of OIDC connection errors. Measured against a dead
+        # endpoint, which is how this check came to exist.
+        problems.append(
+            "no PyPI credential in the environment. Create a token at "
+            "pypi.org (Account settings -> API tokens) and export it:\n"
+            "        export UV_PUBLISH_TOKEN=pypi-...\n"
+            "      Scope it to this project once the project exists -- PyPI "
+            "only offers a project scope for projects you already own, so a\n"
+            "      first upload needs an account-scoped token you then revoke.\n"
+            "      Using keyring or trusted publishing instead? "
+            "--assume-credentials"
+        )
+
     if problems:
         print("\nrefusing to publish:")
         for problem in problems:
@@ -151,8 +209,13 @@ def main() -> int:
         print("(dry run: nothing uploaded)")
         return 0
 
-    run("uv", "publish")
-    print(f"published {name} {version}")
+    # Everything above was a check; this is the part that reaches the world.
+    print("\n  handing over to `uv publish`\n")
+    code = hand_over("uv", "publish")
+    if code != 0:
+        print(f"\n`uv publish` exited {code}: nothing was published", file=sys.stderr)
+        return code
+    print(f"\npublished {name} {version}")
     return 0
 
 
