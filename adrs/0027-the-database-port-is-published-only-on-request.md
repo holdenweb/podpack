@@ -4,6 +4,19 @@
 
 **Date:** 2026-08-13
 
+> **Note, 2026-08-20:** the service and profile called `dbport` below are both
+> named `postgres-port` now, renamed by
+> [ADR-0028](0028-core-services-are-overlays-the-site-chooses.md) when each
+> backing store became an overlay deriving every name from the service's own.
+> The forwarder stopped being PostgreSQL's alone and became `<service>-port`,
+> so MongoDB has one too. The decision recorded here is unchanged; only the
+> spelling is. What works today:
+>
+> ```bash
+> podman compose --profile postgres-port up -d postgres-port
+> podman compose --profile postgres-port rm -sf postgres-port
+> ```
+
 ## Context
 
 The suite published PostgreSQL on `127.0.0.1:${POSTGRES_HOST_PORT}` from the
