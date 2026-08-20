@@ -265,6 +265,23 @@ def status() -> ResponseReturnValue:
                 "stored_files": sorted(
                     p.name for p in (state.data_root / name).iterdir() if p.is_file()
                 ),
+                # What a backup of this site would do with the app, and
+                # whether anybody said so. `null` is not "nothing to keep":
+                # it is nobody having answered, which a backup resolves by
+                # keeping everything. Reported beside `stored_files` because
+                # the two together are the whole question -- an app claiming
+                # to store nothing while listing files is the contradiction
+                # podpack warns about at boot.
+                "backs_up": (
+                    None
+                    if site_app.backs_up is None
+                    else {
+                        "data": site_app.backs_up.data,
+                        "excludes": sorted(site_app.backs_up.excludes),
+                        "extra": list(site_app.backs_up.extra),
+                        "reseedable": site_app.backs_up.reseedable,
+                    }
+                ),
                 # Whatever the app itself chooses to report. Absent when it
                 # says nothing, so an app with nothing to say is
                 # distinguishable from one that reported an empty answer.

@@ -406,6 +406,7 @@ def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
     log_dir = prepare(state.log_root, site_app.name)
     _seed_data(module_name, data_dir)
     attach_file_logging(module_name, log_dir, f"{site_app.name}.log")
+    _check_backup_claim(site_app, data_dir)
 
     if site_app.init is not None:
         site_app.init(app)
@@ -423,6 +424,40 @@ def _install(app: Flask, state: PodpackState, module_name: str) -> SiteApp:
     _check_nav(app, site_app)
     state.nav.extend(site_app.nav)
     return site_app
+
+
+def _check_backup_claim(site_app: SiteApp, data_dir: Path) -> None:
+    """Say when an app's claim of statelessness is contradicted by its disk.
+
+    Warned rather than raised, and this is the one declaration on `SiteApp`
+    treated that way. A missing table breaks the site now; a wrong backup
+    declaration breaks nothing until somebody tries to restore, so refusing
+    to boot would trade a real outage for a hypothetical one. podpack says
+    so at every boot and reports it on `/_status`, which is the same thing
+    it does for unclaimed tables and unclaimed directories -- report, never
+    tidy away.
+
+    Note what is *not* checked: an app that declares nothing. Silence is a
+    legitimate state, backed up in full, and warning about it at every boot
+    would train the reader to skip these lines.
+    """
+    if site_app.backs_up is None or site_app.backs_up.data:
+        return
+    try:
+        left = sorted(entry.name for entry in data_dir.iterdir())
+    except OSError:
+        # An unreadable data directory is a mount problem, and the mount
+        # check on /_status reports it properly. Not this warning's business.
+        return
+    if left:
+        logger.warning(
+            "app %r says it stores nothing, but %s holds %s. A backup will "
+            "skip it on the app's word: either the declaration is wrong, or "
+            "those files are not wanted.",
+            site_app.name,
+            data_dir,
+            ", ".join(left[:5]) + (" ..." if len(left) > 5 else ""),
+        )
 
 
 def _check_mounts(state: PodpackState) -> None:

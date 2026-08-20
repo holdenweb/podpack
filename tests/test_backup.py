@@ -271,3 +271,118 @@ def test_backup_defaults_keep_everything() -> None:
     """The default has to be the safe direction, not the tidy one."""
     assert Backup() == Backup(data=True, excludes=frozenset(), extra=(), reseedable=False)
     assert SiteApp.__dataclass_fields__["backs_up"].default is None
+
+
+# ---------------------------------------------------------------------------
+# The boot check, which reports rather than refuses.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def package(tmp_path: Path):
+    """Build a real package in a directory of its own, optionally shipping data.
+
+    Not `app_package`, which writes a single module straight into `tmp_path`
+    -- the same `tmp_path` the `site` fixture roots its data directory in.
+    `importlib.resources.files()` on a single-module app resolves to the
+    module's *parent*, so `_seed_data` then finds `tmp_path/data`, which is
+    the site's whole data root, and seeds it into the app's own directory.
+    That is the stray-`data/`-beside-the-module trap writing-an-app.md warns
+    about, reached here by accident; a package with its own directory cannot
+    hit it.
+    """
+    import sys
+
+    root = tmp_path / "packages"
+    root.mkdir()
+    sys.path.insert(0, str(root))
+    created: list[str] = []
+
+    def _make(name: str, source: str, ships: dict[str, str] | None = None) -> str:
+        (root / name).mkdir()
+        (root / name / "__init__.py").write_text(source)
+        if ships:
+            (root / name / "data").mkdir()
+            for filename, content in ships.items():
+                (root / name / "data" / filename).write_text(content)
+        created.append(name)
+        return name
+
+    yield _make
+
+    sys.path.remove(str(root))
+    for name in created:
+        sys.modules.pop(name, None)
+
+
+def _site_with(site, name: str):
+    return site(host_config={"site": {"name": "x", "environment": "test", "apps": [name]}})
+
+
+def test_a_stateless_claim_contradicted_by_the_disk_is_warned_about(
+    site, package, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An app shipping data while claiming to store nothing.
+
+    A backup skips it on the app's word, so nobody would find out until a
+    restore produced an app missing files it had always had.
+    """
+    package(
+        "shipper_app",
+        _app("shipper_app", ", backs_up=Backup(data=False)"),
+        ships={"content.md": "kept\n"},
+    )
+    with caplog.at_level("WARNING"):
+        _site_with(site, "shipper_app")
+
+    assert "says it stores nothing" in caplog.text
+    assert "content.md" in caplog.text
+
+
+def test_an_empty_directory_upholds_the_claim_and_says_nothing(
+    site, package, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The ordinary case for a stateless app, which must be silent.
+
+    A warning every boot for the correct state is how people learn to stop
+    reading the boot log.
+    """
+    package("truthful_app", _app("truthful_app", ", backs_up=Backup(data=False)"))
+    with caplog.at_level("WARNING"):
+        _site_with(site, "truthful_app")
+
+    assert "says it stores nothing" not in caplog.text
+
+
+def test_an_undeclared_app_is_never_warned_about(
+    site, package, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Silence is a legitimate state: backed up in full, and not nagged about."""
+    package("unopinionated_app", _app("unopinionated_app"), ships={"a.md": "x"})
+    with caplog.at_level("WARNING"):
+        _site_with(site, "unopinionated_app")
+
+    assert "says it stores nothing" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# What an operator sees.
+# ---------------------------------------------------------------------------
+
+
+def test_status_reports_the_declaration_and_distinguishes_silence(site, package) -> None:
+    package("shown_app", _app("shown_app", ", backs_up=Backup(data=False)"))
+    package("mute_app", _app("mute_app"))
+    built = site(
+        host_config={
+            "site": {"name": "x", "environment": "test", "apps": ["shown_app", "mute_app"]}
+        }
+    )
+    apps = built.test_client().get("/_status").get_json()["apps"]
+
+    assert apps["shown_app"]["backs_up"] == {
+        "data": False, "excludes": [], "extra": [], "reseedable": False,
+    }
+    # Present and null, not absent: "nobody said" is an answer worth showing
+    # an operator, and a missing key would read as an older podpack.
+    assert apps["mute_app"]["backs_up"] is None
