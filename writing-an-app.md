@@ -595,6 +595,43 @@ module.** `importlib.resources.files()` on a top-level module resolves to its
 *containing directory*, so a stray `data/` sitting beside it is seeded as though
 the app shipped it — verified, and the file arrives.
 
+### What a backup does with it
+
+Nothing you need to arrange. A site's `scripts/backup.sh` archives every app's
+data directory, because [ADR-0007](adrs/0007-per-app-data-and-log-directories.md)
+fixes where it is — so the content above comes back whether or not you say
+anything, and that is the intended case.
+
+There is one thing worth saying out loud, and only one. If your app stores
+**nothing** — it streams its output, or derives everything from what the
+request carried — say so:
+
+```python
+from podpack import Backup, Section, SiteApp
+
+site_app = SiteApp(
+    blueprint=blueprint,
+    url_prefix="/qrcode",
+    backs_up=Backup(data=False),
+)
+```
+
+The reason is that an empty directory is ambiguous. Zero bytes means "this app
+is stateless" and "this app's mount never arrived" equally well, and an
+operator staring at a backup has no way to tell them apart. `Backup(data=False)`
+is your answer to that, and podpack holds you to it: if the directory turns out
+not to be empty, it says so at every boot and reports it on `/_status`.
+
+Saying nothing is also an answer, and a safe one — podpack keeps everything and
+records that nobody vouched for it. Do not reach for `Backup(extra=...)` unless
+you genuinely write outside your own directory, which is usually a sign the
+files belong somewhere else.
+
+If a person can edit what you ship, leave `reseedable` alone. It is false by
+default because `_seed_data` fires only into an empty directory: the first
+edit, the first upload, even a stray `.DS_Store`, makes the host copy the only
+copy for as long as the site lives.
+
 ## 8. Configuration, and `init`
 
 A site tunes your app in a table of its own:

@@ -1093,6 +1093,70 @@ The image runs that directory **only while the data directory is empty** — and
 since the data directory is on the host, that means "the first time you bring
 the suite up on this machine", not "every time the container is recreated".
 
+## Backing up, and proving it
+
+Three scripts, and one command that tells them what to do.
+
+```bash
+./scripts/backup.sh          # take one
+./scripts/verify-backup.sh   # prove the last one can be read
+./scripts/restore.sh <dir>   # put it back
+```
+
+**Nothing in them is site-specific.** They ask `podpack backup plan` what this
+site is made of, so installing an app changes what a backup contains with no
+edit anywhere, and a site that enables MongoDB gets its documents dumped
+because the catalogue knows how, not because somebody remembered.
+
+A backup holds the three things a site cannot be rebuilt without — its stores,
+its per-app data directories, and `secrets.env` — plus a `manifest.txt`
+recording the three facts that must agree on the way back in: the commit, the
+app list, and the alembic revision. The app list is there because podpack's
+schema is a function of it: one alembic history covers whichever apps are
+enabled, so a dump restored against a different list leaves tables no app
+claims, and the next autogenerate proposes dropping them.
+
+**The backup directory is secret-bearing.** `secrets.env` goes in verbatim, so
+that a restore is *copy one file, edit the other* rather than a hand-edit
+under pressure. `BACKUP_ROOT` therefore defaults outside the working tree and
+the script refuses to write inside it.
+
+```
+BACKUP_ROOT   where backups go        default ~/backups/<SITE_NAME>
+```
+
+### What an app has to declare
+
+Usually nothing. podpack already knows where an app's files live and reads its
+tables from the mapper registry, so an app that stores things is archived
+correctly without saying a word.
+
+The exception worth declaring is statelessness, because **an empty directory
+is ambiguous** — `podpack-qrcode` holds zero bytes because it streams every
+code it makes, and a mount that never arrived looks exactly the same:
+
+```python
+site_app = SiteApp(blueprint=bp, backs_up=Backup(data=False))
+```
+
+That is a claim podpack checks. An app saying it stores nothing while its
+directory holds files is warned about at boot and reported on `/_status` —
+warned rather than refused, because the failure it describes is in the future
+and an outage would be now. See
+[ADR-0035](adrs/0035-apps-declare-what-is-theirs-to-back-up.md).
+
+### Rehearsing it
+
+`verify-backup.sh` reads every archive right through without applying any of
+it, using the same tool that would restore it, in the same container. Run it
+straight after each backup: a truncated archive found tonight is a non-event,
+and the same archive found in six weeks is a disaster.
+
+That is the cheap half. The other half is `restore.sh` into a scratch
+deployment, which is the only thing that proves the data comes back. A backup
+regime is a claim about the future, and the only evidence for it is a restore
+that has actually happened.
+
 ## Starting over
 
 ```bash

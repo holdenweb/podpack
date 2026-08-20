@@ -41,3 +41,7 @@ scratch/
 # replaced. Deliberately NOT ignored -- committing one is a loud reminder
 # that something is unresolved, which is the point of writing it beside the
 # file rather than into it.
+
+# What scripts/restore.sh sets aside before replacing them. secrets.env is
+# among them, in clear, so this matters more than the tidiness suggests.
+*.superseded-*

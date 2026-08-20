@@ -150,7 +150,7 @@
     },
     "scripts/restore.sh": {
       "class": "verbatim",
-      "sha256": "23aa46ad9be8cce1fa02edae48c438713f64629b03cfabc16909292e19f74571"
+      "sha256": "30be6d5fb07cf4d74dc509cd49c06f5607238ed027069612eef5bcdfe523448f"
     },
     "scripts/up.sh": {
       "class": "verbatim",

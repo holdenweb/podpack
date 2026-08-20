@@ -227,3 +227,14 @@ echo "================================================"
 [[ "$counts_ok" == "yes" ]] || {
     echo "row counts do not match the backup -- the data is NOT fully restored" >&2; exit 1; }
 echo "restore complete, and checked."
+
+# Said out loud because `.gitignore` is a seeded substrate file: podpack never
+# upgrades it, so a site created before this pattern was added will not be
+# ignoring these. One of them is a verbatim copy of secrets.env.
+if ls ./*.superseded-* >/dev/null 2>&1; then
+    echo
+    echo "the previous .env and secrets.env were kept as:"
+    ls -1 ./*.superseded-*
+    echo "delete them once you are satisfied -- one is a copy of every secret"
+    echo "this site has, and it is not ignored on sites older than this script."
+fi
