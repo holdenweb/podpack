@@ -387,3 +387,76 @@ def test_status_reports_the_declaration_and_distinguishes_silence(site, package)
     # Present and null, not absent: "nobody said" is an answer worth showing
     # an operator, and a missing key would read as an older podpack.
     assert apps["mute_app"]["backs_up"] is None
+
+
+# ---------------------------------------------------------------------------
+# The contract the substrate scripts consume.
+#
+# `podpack backup plan` prints JSON and three shell scripts read it. Nothing
+# else couples them, so renaming a key here breaks a restore rather than a
+# test -- which is the wrong way round for the one facility whose failures
+# are only observable at the worst possible moment.
+# ---------------------------------------------------------------------------
+
+PLAN_KEY = __import__("re").compile(r'\b(?:app|service|plan)\["([a-z_]+)"\]')
+
+
+def _keys_the_scripts_read() -> dict[str, set[str]]:
+    """Extract the plan keys the shipped scripts actually reference."""
+    from podpack import substrate
+
+    scripts = Path(substrate.__file__).parent / "data" / "scripts"
+    found: dict[str, set[str]] = {"app": set(), "service": set(), "plan": set()}
+    for script in sorted(scripts.glob("*.sh")):
+        text = script.read_text()
+        for match in __import__("re").finditer(
+            r'\b(app|service|plan)\["([a-z_]+)"\]', text
+        ):
+            found[match.group(1)].add(match.group(2))
+    return found
+
+
+def test_the_plan_carries_every_key_the_scripts_read(
+    app_package: AppPackage, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PODPACK_SERVICE_MARKERS", "1")
+    monkeypatch.setenv("PODPACK_SERVICE_POSTGRES", "1")
+    app_package("contract_app", _app("contract_app"))
+    plan = _plan(capsys, _config(tmp_path, "contract_app"))
+
+    read = _keys_the_scripts_read()
+
+    # Guard the extraction before trusting it. A regex that matched nothing
+    # would make every assertion below vacuously true, which is the failure
+    # mode this project has already been bitten by once.
+    assert len(read["app"]) >= 4, f"suspiciously few app keys found: {read['app']}"
+    assert len(read["service"]) >= 4, f"suspiciously few service keys: {read['service']}"
+    assert read["plan"] >= {"apps", "services"}
+
+    for key in sorted(read["plan"]):
+        assert key in plan, f"the scripts read plan[{key!r}] and the plan has no such key"
+    for key in sorted(read["app"]):
+        assert key in plan["apps"][0], f"the scripts read app[{key!r}], which is not emitted"
+    for key in sorted(read["service"]):
+        assert key in plan["services"][0], f"the scripts read service[{key!r}], not emitted"
+
+
+def test_a_service_entry_carries_its_three_commands(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """dump, restore and verify all reach the scripts that run them.
+
+    `verify` was added to `CoreService` after the first of these tests were
+    written and went several commits without anything asserting it survived
+    the journey into the plan -- which is precisely how verify-backup.sh
+    would have started failing on a key error nobody had exercised.
+    """
+    monkeypatch.setenv("PODPACK_SERVICE_MARKERS", "1")
+    monkeypatch.setenv("PODPACK_SERVICE_POSTGRES", "1")
+    (service,) = _plan(capsys, _config(tmp_path))["services"]
+
+    assert service["dump"].startswith("pg_dump")
+    assert service["restore"].startswith("pg_restore")
+    assert service["verify"] == "pg_restore --list"
+    assert service["file"] == "database.pgc"
