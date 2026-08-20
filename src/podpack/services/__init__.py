@@ -92,6 +92,15 @@ class CoreService:
     restore: str = ""
     """The other direction, under the same rules."""
 
+    verify: str = ""
+    """How to read a dump right through without applying any of it.
+
+    The cheap check that turns a backup from a claim into evidence. Both
+    stores have one because both formats are parsed rather than streamed, so
+    a truncated or corrupt archive fails here -- at the moment the backup is
+    taken, when the original still exists -- instead of during the restore
+    that needed it."""
+
     dump_file: str = ""
     """What the snapshot is called inside a backup directory."""
 
@@ -179,11 +188,21 @@ POSTGRES = CoreService(
     # Custom format rather than SQL, because it makes verification free:
     # `pg_restore --list` parses the entire archive, so a truncated one
     # fails when the backup is taken rather than when it is needed.
-    restore='pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error',
-    #   ^ --exit-on-error is not optional. Without it pg_restore reports
-    #     every failure and still exits 0, so a restore that restored
-    #     nothing looks exactly like one that worked.
+    restore=(
+        'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+        " --clean --if-exists --exit-on-error"
+    ),
+    #   ^ --clean --if-exists because the database a restore lands in is
+    #     never empty: db-init has already created the role and the schema,
+    #     and a second restore lands on the first one's objects. --exit-on-
+    #     error is not optional either -- without it pg_restore reports every
+    #     failure and still exits 0, so a restore that restored nothing looks
+    #     exactly like one that worked.
     dump_file="database.pgc",
+    verify="pg_restore --list",
+    #   ^ parses the whole archive and prints its table of contents, so it
+    #     fails on a truncated one; and the listing doubles as the evidence
+    #     that the dump holds table data rather than an empty schema.
 )
 
 MONGODB = CoreService(
@@ -211,6 +230,11 @@ MONGODB = CoreService(
         " --authenticationDatabase admin --archive --gzip --drop"
     ),
     dump_file="mongodb.archive.gz",
+    verify=(
+        'mongorestore --username "$MONGO_INITDB_ROOT_USERNAME"'
+        ' --password "$MONGO_INITDB_ROOT_PASSWORD"'
+        " --authenticationDatabase admin --archive --gzip --dryRun"
+    ),
 )
 
 CATALOGUE: dict[str, CoreService] = {

@@ -207,6 +207,7 @@ def test_every_catalogued_service_knows_how_to_dump_itself() -> None:
         assert service.dump, f"{name} has no dump command"
         assert service.restore, f"{name} has no restore command"
         assert service.dump_file, f"{name} has no dump file name"
+        assert service.verify, f"{name} has no way to check a dump it took"
 
 
 def test_a_service_with_no_dump_is_reported_rather_than_skipped(

@@ -105,6 +105,20 @@ BASE_MANIFEST: tuple[SubstrateFile, ...] = (
         VERBATIM,
         executable=True,
     ),
+    # ADR-0015 conceded that running the database in a container left backups
+    # to the site, and that this "has not yet been paid for in the one place
+    # it will be missed". These pay it. They are VERBATIM rather than
+    # RENDERED because they name nothing site-specific: what to archive comes
+    # from `podpack backup plan` at run time, so installing an app changes
+    # what a backup contains without changing a line here.
+    SubstrateFile("scripts/backup.sh", "scripts/backup.sh", VERBATIM, executable=True),
+    SubstrateFile("scripts/restore.sh", "scripts/restore.sh", VERBATIM, executable=True),
+    SubstrateFile(
+        "scripts/verify-backup.sh",
+        "scripts/verify-backup.sh",
+        VERBATIM,
+        executable=True,
+    ),
     # The alembic environment is base, not postgres's: `db` and its one
     # history are core to podpack, and ADR-0015 wants moving to a managed
     # PostgreSQL to be a change to one variable and nothing else.

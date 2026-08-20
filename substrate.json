@@ -132,6 +132,10 @@
       "class": "verbatim",
       "sha256": "a77c518c03c7741773eb2f7edefb62aa1570459dcb3a3f52f687c7485ff666cc"
     },
+    "scripts/backup.sh": {
+      "class": "verbatim",
+      "sha256": "b168350279664f991587f02f8044a6d1eef796af053562129b66c5fa2b490bc9"
+    },
     "scripts/configure-host.py": {
       "class": "verbatim",
       "sha256": "65204754991225ee9b164a78db347e3764a58ebd0aa62d180da21709e382d211"
@@ -144,9 +148,17 @@
       "class": "verbatim",
       "sha256": "d39f88f28560a9538e7ca159a4995c2a39480c50f7eb676c71655bd417b33b86"
     },
+    "scripts/restore.sh": {
+      "class": "verbatim",
+      "sha256": "23aa46ad9be8cce1fa02edae48c438713f64629b03cfabc16909292e19f74571"
+    },
     "scripts/up.sh": {
       "class": "verbatim",
       "sha256": "2ef3995ed7777b5d22246ca9fd1ba1a6a54f18f136bad883520db877479cf8d0"
+    },
+    "scripts/verify-backup.sh": {
+      "class": "verbatim",
+      "sha256": "e3b037ab463596c65b28fc1a63a2e819a5dd424c877fc90d1f0f66ef1bbf1023"
     },
     "secrets.env.example": {
       "class": "config",

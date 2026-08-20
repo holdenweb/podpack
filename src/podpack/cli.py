@@ -591,6 +591,7 @@ def _emit_plan(host_config: dict, apps: list[dict], catalogue: dict) -> int:
                 "name": name,
                 "dump": service.dump,
                 "restore": service.restore,
+                "verify": service.verify,
                 "file": service.dump_file,
             }
         )
