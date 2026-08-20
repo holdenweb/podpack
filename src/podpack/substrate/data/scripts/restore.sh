@@ -128,6 +128,31 @@ set -a; . ./.env; set +a
 # ---------------------------------------------------------------------------
 ./scripts/prepare-host-dirs.sh >/dev/null
 echo "unpacking app data into ${HOST_DATA_DIR}/apps ..."
+
+# Each restored app's directory is removed first, and that is the difference
+# between a restore and a merge. `tar -xzf` only ever adds: extracted over a
+# live directory it puts the backup's files back and leaves anything created
+# since sitting beside them, so the result is a state that never existed --
+# and a file deleted on purpose before the backup comes back from the dead.
+# Measured: a marker file planted after a backup survived the restore.
+#
+# Removed per app rather than the whole `apps/` tree, which is the safer
+# shape. An app installed since the backup, or one the backup skipped because
+# it declared itself stateless, keeps whatever it has; only the apps this
+# archive actually carries are replaced by it.
+restored_apps=()
+while IFS= read -r line; do
+    [[ -n "$line" ]] && restored_apps+=("$line")
+done < <(python3 -c '
+import json, sys
+for app in json.load(open(sys.argv[1]))["apps"]:
+    if app["data"]:
+        print(app["name"])
+' "$backup/plan.json")
+
+for app in "${restored_apps[@]}"; do
+    rm -rf "${HOST_DATA_DIR:?}/apps/${app:?}"
+done
 tar -xzf "$backup/app-data.tar.gz" -C "${HOST_DATA_DIR}/apps"
 [[ -f "$backup/app-extra.tar.gz" ]] && tar -xzf "$backup/app-extra.tar.gz" -C "${HOST_DATA_DIR}"
 
@@ -197,18 +222,29 @@ if [[ -s "$backup/rowcounts.txt" ]]; then
     # restores cleanly and leaves a site that looks structurally perfect and
     # has lost everything.
     echo "tables restored:"
-    while IFS='|' read -r schema table expected; do
-        [[ -n "$table" ]] || continue
+    # Read the file before querying anything -- same reason as backup.sh:
+    # the `exec` below would otherwise consume the loop's own input and
+    # verify exactly one table however many the backup recorded.
+    expected_rows=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && expected_rows+=("$line")
+    done < "$backup/rowcounts.txt"
+
+    for entry in "${expected_rows[@]}"; do
+        schema="${entry%%|*}"
+        rest="${entry#*|}"
+        table="${rest%%|*}"
+        expected="${rest#*|}"
         actual="$("${compose[@]}" exec -T postgres sh -c \
             "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc 'select count(*) from \"$schema\".\"$table\"'" \
-            2>/dev/null | tr -d '\r' || echo MISSING)"
+            < /dev/null 2>/dev/null | tr -d '\r' || echo MISSING)"
         if [[ "$actual" == "$expected" ]]; then
             printf '  %-28s %s rows\n' "${schema}.${table}" "$actual"
         else
             printf '  %-28s MISMATCH: expected %s, found %s\n' "${schema}.${table}" "$expected" "$actual"
             counts_ok=no
         fi
-    done < "$backup/rowcounts.txt"
+    done
 fi
 
 printf 'site healthz: '
@@ -231,10 +267,13 @@ echo "restore complete, and checked."
 # Said out loud because `.gitignore` is a seeded substrate file: podpack never
 # upgrades it, so a site created before this pattern was added will not be
 # ignoring these. One of them is a verbatim copy of secrets.env.
-if ls ./*.superseded-* >/dev/null 2>&1; then
+# `find` rather than a glob: a leading `*` does not match a leading dot, so
+# `./*.superseded-*` silently listed secrets.env's copy and not .env's.
+kept="$(find . -maxdepth 1 -name '*.superseded-*' | sort)"
+if [[ -n "$kept" ]]; then
     echo
     echo "the previous .env and secrets.env were kept as:"
-    ls -1 ./*.superseded-*
+    echo "$kept"
     echo "delete them once you are satisfied -- one is a copy of every secret"
     echo "this site has, and it is not ignored on sites older than this script."
 fi

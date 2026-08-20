@@ -134,7 +134,7 @@
     },
     "scripts/backup.sh": {
       "class": "verbatim",
-      "sha256": "b168350279664f991587f02f8044a6d1eef796af053562129b66c5fa2b490bc9"
+      "sha256": "26b936783827f84bf03bdfd8b0b548c3578b4131be8d40ebefcf6280bba44876"
     },
     "scripts/configure-host.py": {
       "class": "verbatim",
@@ -150,7 +150,7 @@
     },
     "scripts/restore.sh": {
       "class": "verbatim",
-      "sha256": "30be6d5fb07cf4d74dc509cd49c06f5607238ed027069612eef5bcdfe523448f"
+      "sha256": "bed1aec257eeb48a4e99fbbe572fdc895d0ce466329c61c0b9b9e5821eedba26"
     },
     "scripts/up.sh": {
       "class": "verbatim",

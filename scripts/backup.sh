@@ -245,15 +245,27 @@ echo "  secrets.env, env, config.tar.gz"
 # ---------------------------------------------------------------------------
 : > "$dest/rowcounts.txt"
 if "${compose[@]}" ps --status running --services 2>/dev/null | grep -qx postgres; then
-    while read -r schema table; do
-        [[ -n "$table" ]] || continue
-        count="$("${compose[@]}" exec -T postgres sh -c \
-            "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc 'select count(*) from \"$schema\".\"$table\"'" \
-            2>/dev/null | tr -d '\r')"
-        printf '%s|%s|%s\n' "$schema" "$table" "$count" >> "$dest/rowcounts.txt"
+    # The table list is collected before a single count is asked for, for
+    # the reason the dump loop above gives at length: `podman compose exec`
+    # reads standard input, and standard input inside a `while read` loop is
+    # the list being iterated. Feeding it directly cost this script four of
+    # its five tables -- silently, since a shorter file looks like a smaller
+    # database.
+    tables=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && tables+=("$line")
     done < <("${compose[@]}" exec -T postgres sh -c \
         'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -F" " -c "select schemaname, tablename from pg_tables where schemaname not in ('"'"'pg_catalog'"'"', '"'"'information_schema'"'"') order by schemaname, tablename"' \
-        2>/dev/null | tr -d '\r')
+        < /dev/null 2>/dev/null | tr -d '\r')
+
+    for entry in "${tables[@]}"; do
+        schema="${entry%% *}"
+        table="${entry#* }"
+        count="$("${compose[@]}" exec -T postgres sh -c \
+            "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -Atc 'select count(*) from \"$schema\".\"$table\"'" \
+            < /dev/null 2>/dev/null | tr -d '\r')"
+        printf '%s|%s|%s\n' "$schema" "$table" "$count" >> "$dest/rowcounts.txt"
+    done
     echo "  rowcounts.txt    $(wc -l < "$dest/rowcounts.txt" | tr -d ' ') tables"
 fi
 
