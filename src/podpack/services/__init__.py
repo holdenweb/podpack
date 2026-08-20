@@ -77,6 +77,30 @@ class CoreService:
     """Override for the first-run bootstrap directory. Empty derives
     `<name>-init`."""
 
+    dump: str = ""
+    """How to take a consistent snapshot of this store.
+
+    A shell command rather than an argv list, run inside the service's own
+    container as `sh -c`. That is what lets the credentials arrive from the
+    container's own environment instead of from a process argument, where
+    `ps` on a shared host would show them to anybody looking.
+
+    A snapshot, never a copy of the data directory: copying a live store
+    produces a torn image that may or may not recover on start, and the
+    failure is silent until the day it matters."""
+
+    restore: str = ""
+    """The other direction, under the same rules."""
+
+    dump_file: str = ""
+    """What the snapshot is called inside a backup directory."""
+
+    # Those three are declared per service rather than derived, and the rule
+    # this catalogue is built on is exactly why that needs saying: nothing
+    # turns `postgres` into `pg_dump`, or `mongodb` into `mongodump`. They
+    # join `uri_env` and `init_dir` as exceptions carrying their reason,
+    # which is this file's own convention for a rule that does not reach.
+
     # ---- derived: the rule ------------------------------------------------
 
     @property
@@ -143,6 +167,23 @@ POSTGRES = CoreService(
     #   ^ the directory every existing site already has. The engine has no
     #     verb that removes a file, so renaming it would strand a `db-init/`
     #     in three sites that `status` would never mention again.
+    #
+    # The whole database, not `--schema=app`: a filter would silently drop
+    # anything a future app puts elsewhere, and the cost of carrying it is
+    # a few kilobytes. Owners are kept, deliberately -- `db-init` recreates
+    # the application role under the same name on the way back in, and the
+    # app owning its own schema is what lets it create tables without any
+    # privilege over the rest of the database. Restoring ownerless hands
+    # the schema to the admin role and breaks the next migration.
+    dump='pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom',
+    # Custom format rather than SQL, because it makes verification free:
+    # `pg_restore --list` parses the entire archive, so a truncated one
+    # fails when the backup is taken rather than when it is needed.
+    restore='pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --exit-on-error',
+    #   ^ --exit-on-error is not optional. Without it pg_restore reports
+    #     every failure and still exits 0, so a restore that restored
+    #     nothing looks exactly like one that worked.
+    dump_file="database.pgc",
 )
 
 MONGODB = CoreService(
@@ -155,6 +196,21 @@ MONGODB = CoreService(
     summary="MongoDB, for apps that store documents rather than rows",
     driver="pymongo",
     extra="mongodb",
+    # The root credentials, because a backup has to read everything and the
+    # application role deliberately cannot. `--archive` writes one stream to
+    # stdout, which is what lets this be piped out of the container exactly
+    # as pg_dump is, with no shared volume between them.
+    dump=(
+        'mongodump --username "$MONGO_INITDB_ROOT_USERNAME"'
+        ' --password "$MONGO_INITDB_ROOT_PASSWORD"'
+        " --authenticationDatabase admin --archive --gzip"
+    ),
+    restore=(
+        'mongorestore --username "$MONGO_INITDB_ROOT_USERNAME"'
+        ' --password "$MONGO_INITDB_ROOT_PASSWORD"'
+        " --authenticationDatabase admin --archive --gzip --drop"
+    ),
+    dump_file="mongodb.archive.gz",
 )
 
 CATALOGUE: dict[str, CoreService] = {

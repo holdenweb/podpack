@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 from contextlib import ExitStack
 import difflib
+import json
+import os
 import re
 import sys
 import tomllib
@@ -30,13 +32,18 @@ from .substrate import Action, Parameters, State
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    # Keyed by the pair now that there is a second group. `upgrade` under
+    # `substrate` and a future `upgrade` under anything else are different
+    # commands, and a dict keyed on the verb alone would have let the second
+    # one silently take the first one's handler.
     handler = {
-        "init": _init,
-        "upgrade": _upgrade,
-        "status": _status,
-        "services": _services,
-        "diff": _diff,
-    }[args.subcommand]
+        ("substrate", "init"): _init,
+        ("substrate", "upgrade"): _upgrade,
+        ("substrate", "status"): _status,
+        ("substrate", "services"): _services,
+        ("substrate", "diff"): _diff,
+        ("backup", "plan"): _backup_plan,
+    }[(args.command, args.subcommand)]
     return handler(args)
 
 
@@ -54,6 +61,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "  podpack substrate upgrade    bring the copy forward after upgrading\n"
             "  podpack substrate diff       what differs, file by file\n"
             "  podpack substrate services   which backing services this site runs\n"
+            "\nthe backup commands:\n"
+            "  podpack backup plan          what a backup of this site must include\n"
             "\nany of them with --help for its own options."
         ),
         description=(
@@ -158,6 +167,35 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     diff.add_argument("--dir", default=".", help="site directory (default: .)")
     diff.add_argument("paths", nargs="*", help="targets to diff (default: all that differ)")
+
+    backup = commands.add_parser(
+        "backup",
+        help="what a backup of this site has to include",
+        description=(
+            "podpack knows which apps a site installs and what each of them "
+            "keeps; the host knows how to reach the containers. So this "
+            "answers the first question and executes none of it -- "
+            "scripts/backup.sh reads what `plan` prints and does the work."
+        ),
+    )
+    backup_actions = backup.add_subparsers(dest="subcommand", required=True)
+
+    plan = backup_actions.add_parser(
+        "plan",
+        help="print what a backup of this site must include, as JSON",
+        description=(
+            "Run this where the apps are installed, which on a deployed site "
+            "means inside the web container: `podman compose exec -T web "
+            "podpack backup plan`. It imports every installed app to read its "
+            "declaration and needs no running application, no secret key and "
+            "no reachable database."
+        ),
+    )
+    plan.add_argument(
+        "--config", default=None, metavar="PATH",
+        help="the site's config file; default: $PODPACK_CONFIG, "
+             "or config/app.toml",
+    )
 
     return parser
 
@@ -471,6 +509,99 @@ def _diff(args: argparse.Namespace) -> int:
                 tofile=f"site: {entry.target}",
             )
             sys.stdout.writelines(diff)
+    return 0
+
+
+def _backup_plan(args: argparse.Namespace) -> int:
+    """Print what a backup of this site has to include.
+
+    JSON on stdout, because the consumer is a shell script and every host
+    that can run this can run `python3 -c`. It carries app *names* and
+    subpaths and never absolute paths: this runs in the container, where the
+    data root is /var/lib/<site>/apps, while the script runs on the host,
+    where it is $HOST_DATA_DIR/apps. ADR-0007 fixes the layout as
+    <root>/<name>, so the script joins names to its own root and the two
+    cannot disagree.
+
+    Imports are local to this handler. `podpack --version` and every
+    substrate command work from files on disk alone, and there is no reason
+    a site inspecting its own substrate should have to import Flask, its
+    apps, or anything those apps import in turn.
+    """
+    from .config import installed_apps, load_host_config
+    from .registry import installed_site_apps
+    from .services import CATALOGUE
+
+    config_path = args.config or os.environ.get("PODPACK_CONFIG", "config/app.toml")
+    host_config = load_host_config(config_path)
+    installed = installed_site_apps(installed_apps(host_config))
+
+    # defined_by answers "who owns this table"; a backup wants the question
+    # the other way round.
+    owns: dict[str, list[str]] = {}
+    for table, owner in installed.defined_by.items():
+        owns.setdefault(owner, []).append(table)
+
+    apps = []
+    for name, site_app in sorted(installed.apps.items()):
+        declared = site_app.backs_up
+        apps.append(
+            {
+                "name": name,
+                # Whether anybody vouched for the entry below it. An
+                # undeclared app is backed up in full, and saying so is the
+                # point: it is the difference between a considered decision
+                # and nobody having thought about it.
+                "declared": declared is not None,
+                "data": True if declared is None else declared.data,
+                "excludes": sorted(declared.excludes) if declared else [],
+                "extra": list(declared.extra) if declared else [],
+                "reseedable": bool(declared and declared.reseedable),
+                "tables": sorted(owns.get(name, [])),
+            }
+        )
+
+    return _emit_plan(host_config, apps, CATALOGUE)
+
+
+def _emit_plan(host_config: dict, apps: list[dict], catalogue: dict) -> int:
+    """Add the services, and print the result.
+
+    Which services are running is read from the PODPACK_SERVICE_<NAME>
+    markers each enabled overlay stamps into `web` and `migrate`. That is
+    deliberately not the site's own declaration: the markers record what
+    compose actually merged, which a config file can claim and be wrong
+    about. Outside a container none are set, and the plan says so rather
+    than guessing -- a backup script that quietly dumped nothing would be
+    the worst possible outcome here.
+    """
+    services = []
+    for name, service in catalogue.items():
+        if not os.environ.get(service.marker_env):
+            continue
+        if not service.dump:
+            # A catalogued store with no dump command is a gap in podpack,
+            # not in the site, and it must not pass silently: this is
+            # exactly the shape of the bug that prompted the feature.
+            services.append({"name": name, "dump": None,
+                             "problem": "podpack knows no dump command for this service"})
+            continue
+        services.append(
+            {
+                "name": name,
+                "dump": service.dump,
+                "restore": service.restore,
+                "file": service.dump_file,
+            }
+        )
+
+    plan = {
+        "site": host_config.get("site", {}).get("name", ""),
+        "in_container": bool(os.environ.get("PODPACK_SERVICE_MARKERS")),
+        "apps": apps,
+        "services": services,
+    }
+    print(json.dumps(plan, indent=2))
     return 0
 
 

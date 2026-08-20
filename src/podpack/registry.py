@@ -64,6 +64,54 @@ class Health:
 
 
 @dataclass(frozen=True)
+class Backup:
+    """What of this app's state has to come back for the app to be whole.
+
+    Almost always unnecessary, and deliberately so. podpack already knows
+    where an app's files live -- `<data root>/<name>`, created for every app
+    at install (ADR-0007) -- and reads its tables from the mapper registry,
+    so an app that stores things ordinarily declares nothing here and is
+    archived correctly anyway. This is for what looking cannot establish.
+    """
+
+    data: bool = True
+    """Whether this app's own data directory holds anything worth keeping.
+
+    `False` is a claim of statelessness rather than a request to skip the
+    directory, and podpack checks it: a stateless app whose directory is not
+    empty is reported, not quietly believed. Worth saying out loud because
+    an empty directory is otherwise ambiguous -- `podpack-qrcode` holds zero
+    bytes because it streams every code it makes, and a mount that never
+    arrived looks exactly the same from here."""
+
+    excludes: frozenset[str] = frozenset()
+    """Subtrees of that directory holding derived data a restore can rebuild.
+
+    Names directly beneath the app's own directory, not paths: anything
+    deeper is a sign the app is managing a tree it should be managing
+    through its own code."""
+
+    extra: tuple[str, ...] = ()
+    """State this app keeps outside its own directory, relative to the data
+    root.
+
+    The escape hatch, and the one declaration here to be suspicious of. An
+    app that needs it is usually an app writing somewhere it should not be,
+    and moving the files is nearly always cheaper than teaching every
+    backup on every site about the exception."""
+
+    reseedable: bool = False
+    """Whether a fresh install would regenerate this from what the app ships.
+
+    False for anything a person can edit, which in practice is nearly
+    everything: `_seed_data` fires only into an empty directory, so the
+    first edit -- or the first upload, or a stray `.DS_Store` -- makes the
+    host copy the only copy for as long as the site lives (ADR-0008).
+    Claiming `True` where that is not so invites a restore that quietly
+    reinstalls the shipped version over content nobody can get back."""
+
+
+@dataclass(frozen=True)
 class SiteApp:
     """An installable unit of site functionality.
 
@@ -146,6 +194,30 @@ class SiteApp:
 
     `db.metadata` is the one namespace podpack does not divide by app name,
     which is why any of this needs saying at all.
+    """
+
+    backs_up: "Backup | None" = None
+    """What this app stores, for a site backing itself up.
+
+    Declared here for the same reason `needs_tables` is: the author knows,
+    and the site owner installing the app has no way to. Almost always
+    unnecessary -- see `Backup`, which exists for what podpack cannot work
+    out by looking::
+
+        site_app = SiteApp(blueprint=bp, backs_up=Backup(data=False))
+
+    `None` means the app has not said, and podpack reads that as *back
+    everything up, and report that nobody vouched for it*. Backing up more
+    than necessary costs disk; backing up less costs the data. It is not
+    the same as `Backup(data=False)`, which is a claim somebody can be held
+    to, and which podpack will contradict at boot if the directory says
+    otherwise.
+
+    Unlike every other declaration on this class, a wrong answer here is not
+    checked by refusing to start. Nothing it describes is needed until a
+    restore, and taking a working site down over a backup declaration would
+    trade a real outage for a hypothetical one; so this one warns and
+    reports, and `/_status` carries the answer for anybody who asks.
     """
 
     def healthz(self) -> "Health | None":
@@ -427,10 +499,43 @@ def import_app_models(names: Iterable[str]) -> None:
     failure surfaced one service later in `web` -- so the logs blamed the thing
     that was merely next. The check needs no Flask app, so ADR-0010 is untouched.
     """
+    installed_site_apps(names)
+
+
+@dataclass(frozen=True)
+class Installed:
+    """What one traversal of a site's app list learned about it."""
+
+    apps: dict[str, SiteApp]
+    """Each installed app's declaration, keyed by the app's own name."""
+
+    defined_by: dict[str, str]
+    """Which app defines each table, read from the mapper registry."""
+
+
+def installed_site_apps(names: Iterable[str]) -> Installed:
+    """Import every named app and keep what it declares, with no Flask app.
+
+    The same traversal `import_app_models` performs and the same contract
+    check -- it *is* that traversal now -- differing only in keeping what it
+    learned rather than discarding it. Every declaration on `SiteApp` is
+    readable from an imported module, so this needs no application, no secret
+    key and no working database URI, which is what lets `podpack backup plan`
+    answer from the command line (ADR-0010, ADR-0031).
+
+    Written this way round on purpose. ADR-0010 warns that a second traversal
+    of the app list is another thing to keep in step with `install_apps`, and
+    a third would have been worse: `import_app_models` was already building
+    these objects and throwing them away, so returning them keeps the count
+    where it was.
+    """
     needed_by: dict[str, set[str]] = {}
     defined_by: dict[str, str] = {}
+    apps: dict[str, SiteApp] = {}
     for name in names:
-        _import_app(name, needed_by, defined_by)
+        site_app = _import_app(name, needed_by, defined_by)
+        apps[site_app.name] = site_app
+    return Installed(apps=apps, defined_by=defined_by)
 
 
 def _import_app(

@@ -30,11 +30,12 @@ from .config import (
 )
 from .database import db
 from .nav import Section, sections
-from .registry import Health, PodpackState, SiteApp, install_apps
+from .registry import Backup, Health, PodpackState, SiteApp, install_apps
 from .urls import absolute_url, base_url, check_base_url
 
 __all__ = [
     "ADMIN_ROLE",
+    "Backup",
     "Health",
     "Section",
     "SiteApp",
