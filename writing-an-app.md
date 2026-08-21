@@ -551,7 +551,8 @@ shared across every installed app. So podpack warns you as it installs one:
 ```
 WARNING podpack.registry: app 'alpha' declares the table 'things', which its own
 name does not prefix. Table names are shared across every installed app, so a
-second app claiming 'things' will stop a site booting.
+second app claiming 'things' will stop a site booting. Name it in the app's
+`needs_tables` if it is deliberate.
 ```
 
 A warning rather than a failure, because a bare name is legal and might be what
@@ -560,10 +561,10 @@ arriving the day somebody installs your app beside another — so it is worth
 heeding while you are the one reading the log:
 
 ```
-RuntimeError: installing 'beta' failed: it declares the table 'things', which
-'alpha' already claims. Table names are shared across every installed app --
-unlike templates, data directories and config sections, which podpack namespaces
-by app name -- so prefix __tablename__ with the app's own name.
+RuntimeError: installing 'beta' failed: it declares the table 'things', already
+needed by 'alpha'. Table names are shared across every installed app -- unlike
+templates, data directories and config sections, which podpack namespaces by app
+name -- so prefix __tablename__ with the app's own name.
 ```
 
 SQLAlchemy is what actually refuses the second definition, and its
@@ -1157,6 +1158,13 @@ worth raising before you build around the gap.
 
 # When it goes wrong
 
+Every message below was produced by running the failure, not transcribed from
+the source — and `tools/provoke-errors.py` in podpack's repository will produce
+them again. Worth knowing if you are reading this against a newer podpack than
+the one it was written for: prose does not move when code does, and three of
+these quotes had drifted before that script existed.
+
+
 Every message below was produced by introducing exactly that defect into a
 working app, and then reproduced independently by someone who had not seen the
 first attempt.
@@ -1236,6 +1244,32 @@ Mount points belong to the site, so move it to:
 
 `[apps.myapp]` is for settings the app itself reads.
 ```
+
+### A declared need that nothing satisfies
+
+```
+RuntimeError: this site is missing a table that nothing installed defines:
+'nobody_defines_this', needed by 'needy'. Either add the app that defines it to
+`[site] apps`, or stop installing the app that needs it.
+```
+
+Checked against what is *declared*, not against the database: whether the table
+has actually been created is alembic's business, while whether anything even
+claims to define it is answerable at boot, which is far earlier and far cheaper.
+
+### A secret the app needs and the site has not set
+
+```
+RuntimeError: this site cannot start: not set: MAPS_API_KEY (needed by app
+'secretive'). Secrets come from the environment, which compose fills from
+secrets.env; a local run gets them from dev.env via scripts/dev.sh.
+```
+
+Checked after the apps are imported, which is the first moment the declarations
+exist — and still long before the site serves. Declare only what your app
+genuinely cannot run without: a key that turns on an optional feature belongs in
+`[apps.<name>]` with a sensible absence, because naming it here makes the whole
+site refuse to start.
 
 ### `data_dir()` or `app_config()` outside a request
 
