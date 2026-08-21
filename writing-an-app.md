@@ -40,6 +40,16 @@ site_app = SiteApp(
 )
 ```
 
+Four more fields exist, all of them declarations podpack checks rather than
+behaviour it calls, and **an ordinary app leaves every one of them alone**:
+
+| Field | Say something here when |
+| --- | --- |
+| `needs_secrets` | your app cannot run without an environment variable. Checked at boot, so a missing credential stops the deployment instead of surfacing the first time somebody uses the feature ([ADR-0034](adrs/0034-apps-declare-what-they-need.md)) |
+| `needs_tables` | you read or write a table you do not define — joining to `user`, say. A *need*, not a claim: several apps may need one table |
+| `defines_tables` | you define a table the mapper registry cannot see, such as an association built with a bare `db.Table`. Almost always empty, because what you define is read as a fact rather than declared |
+| `backs_up` | your app stores **nothing**, so a backup can skip its directory on your word rather than archiving an empty one and hoping ([ADR-0035](adrs/0035-apps-declare-what-is-theirs-to-back-up.md)) |
+
 | You provide | podpack does |
 | --- | --- |
 | `site_app` | imports your package when a site lists it in `apps` |
@@ -1318,14 +1328,16 @@ Honest notes, from building an app rather than imagining one.
 - **Table names are the one identifier podpack does not namespace**, and it can
   only warn about that rather than prevent it. The clash still lands on the site
   that installed both apps rather than on either author.
-- **An app cannot declare what it needs** — neither a podpack version, nor a
-  service the site wires, nor a backing store. The last of those is now a
-  decision rather than a gap: which core services a site runs is the site
-  owner's to make, independently of its apps
+- **An app can declare some of what it needs, and not the rest.** Secrets and
+  tables it can state, and podpack refuses to boot a site that cannot satisfy
+  them ([ADR-0034](adrs/0034-apps-declare-what-they-need.md)) — that gap is
+  closed. What is still missing: a **podpack version floor**, which remains
+  prose and hope, and a **service the site wires**, such as mail. A backing
+  store is a decision rather than a gap: which core services a site runs is
+  the site owner's, independently of its apps
   ([ADR-0028](adrs/0028-core-services-are-overlays-the-site-chooses.md)), so
-  an app that needs MongoDB says so in its README and reads
-  `MONGODB_URI` from the environment. A podpack version floor is still
-  prose and hope.
+  an app needing MongoDB says so in its README and reads `MONGODB_URI` from
+  the environment.
 - **Apps cannot ship migrations**, so every site regenerates your schema in its
   own history. Fine while a schema is stable.
 - **An app that ships changing data has no upgrade path**, and neither has one
