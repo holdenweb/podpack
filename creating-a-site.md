@@ -1,9 +1,9 @@
 # Creating a podpack site from scratch
 
 Every command here was run while writing this, and then the whole document was
-followed again from scratch by people who had not seen the project — twice, once
-locally and once in containers. Where they tripped, the document changed. The
-errors quoted are real ones.
+followed again from scratch — twice, once locally and once in containers — by
+agents given the document and nothing else. Where they tripped, the document
+changed. The errors quoted are real ones.
 
 A site is a Python package that calls podpack's factory, a TOML file saying what
 it is and what it installs, and — to deploy it — a copy of the container
