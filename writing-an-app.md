@@ -1,11 +1,12 @@
 # Writing a podpack app
 
 Every command and every error message here was produced by running it. The
-worked example was built from scratch by following this document; the failures
-in [When it goes wrong](#when-it-goes-wrong) were each reproduced deliberately
-and then reproduced again independently; and the document was then followed from
-scratch a second time by people who had not seen it, which is where about a
-dozen of its corrections came from.
+worked example was built and run before any of this was written up; the failures
+in [When it goes wrong](#when-it-goes-wrong) were each introduced deliberately
+and then reproduced by a second agent working from its own scripts; and the
+finished document was handed to further agents — one building the app from
+nothing but these instructions, others checking every claim against podpack's
+source — which is where about a dozen of its corrections came from.
 
 **An app is a package exposing one module-level `site_app`.** Everything else —
 models, templates, shipped data, configuration, navigation — is convention that
