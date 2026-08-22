@@ -1159,7 +1159,7 @@ worth raising before you build around the gap.
 # When it goes wrong
 
 Every message below was produced by running the failure, not transcribed from
-the source — and `tools/provoke-errors.py` in podpack's repository will produce
+the source — and `provoke-errors.py` in podpack's repository will produce
 them again. Worth knowing if you are reading this against a newer podpack than
 the one it was written for: prose does not move when code does, and three of
 these quotes had drifted before that script existed.
