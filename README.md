@@ -1259,7 +1259,8 @@ essentially as it stands. The mapping:
 | --- | --- |
 | an **Nginx Proxy Port** app's port assignment | `WEB_HOST_PORT` in `.env` |
 | the app directory `~/apps/<name>/` | `HOST_DATA_DIR`, `HOST_LOG_DIR` in `.env` |
-| the site domain | `base_url` in `config/app.toml` |
+| an nginx in front of you, terminating TLS | `PODPACK_PROXY_HOPS=1` in `.env` |
+| the site domain | **nowhere** — see below |
 
 That is the whole of it, which is the point: the port a managed host allocates is
 exactly the kind of per-host fact `.env` exists for. Opalstack generates the
@@ -1275,9 +1276,35 @@ Two things to watch, neither of them podpack's doing:
 - **`loginctl enable-linger <uid>`** is needed for containers to keep running
   when you are not logged in; their tutorial mentions it in passing.
 
-`base_url` is the site's public URL — `https://example.com`, with **no port**.
-The allocated port is where the container listens, not how the world addresses
-the site, and the two are only ever the same number in a lab.
+### The domain goes nowhere, and `PODPACK_PROXY_HOPS` is why
+
+The instinct is to write the site's domain into its configuration. Don't: a
+managed host's domain binding belongs to its control panel, and a site told its
+own name goes wrong the moment somebody changes it there.
+
+It does not need telling. Every URL a site builds is built inside the request
+that asked for it, and nginx passes the visitor's `Host` through — so the site
+answers correctly under whatever name reaches it, including one nobody knew
+about when it was deployed. What nginx does *not* pass through is the scheme:
+the visitor arrives over TLS and the proxy forwards plain HTTP, so without
+`PODPACK_PROXY_HOPS=1` every absolute URL comes out `http://`.
+
+Nothing looks broken when that is wrong. Every page serves; only absolute URLs
+are affected, and nginx redirects them to `https` anyway. The first sign is a
+password-reset mail carrying an `http://` link — which is how it was found here
+— and the cost is that a recipient whose browser holds no HSTS entry sends the
+reset token in the path of a cleartext request. `/_status` reports what arrived
+and what the site concluded, so the setting can be confirmed without mailing
+anybody. [ADR-0036](adrs/0036-the-host-says-whether-to-believe-the-proxy.md)
+has the reasoning, including why this is an environment variable and not a key
+in `config/app.toml`.
+
+`base_url` in `config/app.toml` is a different and narrower thing: the address
+to use where there is **no request to ask** — a cron job, a CLI command
+building a link with no browser on the other end. A site whose links are all
+built inside requests does not need it. Where a site does, it is the public
+URL, `https://example.com`, with **no port**: the allocated port is where the
+container listens, not how the world addresses the site.
 
 ### Using the managed PostgreSQL instead
 

@@ -14,12 +14,21 @@ import time
 from collections.abc import Mapping
 
 import sqlalchemy as sa
-from flask import Blueprint, Flask, abort, current_app, jsonify, render_template
+from flask import (
+    Blueprint,
+    Flask,
+    abort,
+    current_app,
+    jsonify,
+    render_template,
+    request,
+)
 from flask.typing import ResponseReturnValue
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
 from .paths import unclaimed
+from .proxy import proxy_hops
 from .registry import SiteApp
 
 core_blueprint = Blueprint("podpack", __name__)
@@ -188,6 +197,23 @@ def _reported(site_app: SiteApp) -> dict[str, object]:
     return {} if reported is None else {"reported": reported}
 
 
+def _proxy_report() -> dict[str, object]:
+    """What the proxy said, and what this site concluded from it.
+
+    Both halves, because either alone is ambiguous: a site reporting `http`
+    might be behind a proxy that sends no header, or in front of one it has
+    not been told to trust, and the remedy differs. This is also the only way
+    to settle the question on a running host without sending a password-reset
+    mail to somebody and reading the link out of it.
+    """
+    return {
+        "hops_trusted": proxy_hops(),
+        "forwarded_proto": request.headers.get("X-Forwarded-Proto", "(not sent)"),
+        "scheme": request.scheme,
+        "host": request.host,
+    }
+
+
 def _is_operator() -> bool:
     """Whether this request may read the site's own configuration.
 
@@ -223,6 +249,10 @@ def status() -> ResponseReturnValue:
         **_database_identity(),
         site=state.host_config["site"],
         config_source=os.environ.get("PODPACK_CONFIG", "(default)"),
+        # The scheme and host this site believes it serves on, which is what
+        # every `_external=True` URL is built from -- a password-reset mail
+        # among them. See podpack.proxy for why it is a host's decision.
+        proxy=_proxy_report(),
         # Baked in at build time. The question this answers is "is the container
         # running the code I am looking at?", which a timestamp only approximates
         # -- editing framework source needs a rebuild, not a restart, and the

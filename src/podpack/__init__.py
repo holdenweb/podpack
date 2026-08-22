@@ -30,6 +30,7 @@ from .config import (
 )
 from .database import db
 from .nav import Section, sections
+from .proxy import proxy_hops, trust_proxy
 from .registry import Backup, Health, PodpackState, SiteApp, install_apps
 from .urls import absolute_url, base_url, check_base_url
 
@@ -46,6 +47,7 @@ __all__ = [
     "create_app",
     "db",
     "is_admin",
+    "proxy_hops",
     "sections",
 ]
 
@@ -106,8 +108,15 @@ def create_app(
     # secrets it is short of -- all of them, in one message -- rather than
     # failing later and more obscurely on whichever is read first.
     check_secrets(framework_secrets(host_config))
+    # Read here, with the other boot checks, so an unreadable value is one
+    # clear message rather than a traceback out of the middleware stack on
+    # whichever request happens to arrive first.
+    hops = proxy_hops()
 
     app = Flask(site_package or __name__)
+    # Before anything else touches wsgi_app, so the forwarded headers are
+    # resolved before any other middleware reads the environ.
+    trust_proxy(app, hops)
 
     _configure(app, host_config)
     if config_overrides:
