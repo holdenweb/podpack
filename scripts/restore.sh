@@ -150,11 +150,32 @@ for app in json.load(open(sys.argv[1]))["apps"]:
         print(app["name"])
 ' "$backup/plan.json")
 
+# Both the removal and the unpacking happen inside the user namespace on Linux.
+# `prepare-host-dirs.sh`, four lines above, has just handed these directories to
+# the containers' unprivileged uids with `podman unshare chown` -- and may have
+# done so on a previous restore too -- so from outside the namespace they belong
+# to a subuid this process cannot write to or delete.
+#
+# Measured on a real Linux host: every `mkdir` in the unpack failed with
+# "Permission denied", after the script had already replaced .env and
+# secrets.env, leaving a checkout wearing the backup's identity and holding none
+# of its data. macOS never sees it, because that chown is gated on `uname -s`
+# -- so this script passed every test it had ever been given, for the wrong
+# reason, and failed the first time it was asked to do the job it exists for.
+#
+# --no-same-owner because the archive records the *host* uids the files carried
+# outside the namespace, which mean nothing inside it. Ownership is set
+# afterwards by the init-storage service, which is what does it on any `up`.
+inside_namespace() {
+    if [[ "$(uname -s)" == "Linux" ]]; then podman unshare "$@"; else "$@"; fi
+}
+
 for app in "${restored_apps[@]}"; do
-    rm -rf "${HOST_DATA_DIR:?}/apps/${app:?}"
+    inside_namespace rm -rf "${HOST_DATA_DIR:?}/apps/${app:?}"
 done
-tar -xzf "$backup/app-data.tar.gz" -C "${HOST_DATA_DIR}/apps"
-[[ -f "$backup/app-extra.tar.gz" ]] && tar -xzf "$backup/app-extra.tar.gz" -C "${HOST_DATA_DIR}"
+inside_namespace tar -xzf "$backup/app-data.tar.gz" --no-same-owner -C "${HOST_DATA_DIR}/apps"
+[[ -f "$backup/app-extra.tar.gz" ]] && \
+    inside_namespace tar -xzf "$backup/app-extra.tar.gz" --no-same-owner -C "${HOST_DATA_DIR}"
 
 # ---------------------------------------------------------------------------
 # 3. Each store alone, so its bootstrap creates the role the dump's objects

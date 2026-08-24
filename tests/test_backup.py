@@ -8,6 +8,7 @@ the one thing it cannot see -- an empty directory, which means "stateless" or
 
 import json
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -460,3 +461,38 @@ def test_a_service_entry_carries_its_three_commands(
     assert service["restore"].startswith("pg_restore")
     assert service["verify"] == "pg_restore --list"
     assert service["file"] == "database.pgc"
+
+
+def _restore_script() -> str:
+    from podpack import substrate
+
+    return (Path(substrate.__file__).parent / "data" / "scripts" / "restore.sh").read_text()
+
+
+def test_restore_touches_the_data_directory_only_inside_the_namespace() -> None:
+    """Every write into the app data root must go through `inside_namespace`.
+
+    On Linux `prepare-host-dirs.sh` gives those directories to the containers'
+    unprivileged uids with `podman unshare chown`, so from outside the namespace
+    they belong to a subuid the script cannot write to. A bare `tar -xzf` there
+    fails on every entry -- which is what happened on a real host, after the
+    script had already replaced .env and secrets.env.
+
+    Static, because the alternative is a Linux host with rootless podman in the
+    test suite. Its value is entirely in failing when somebody adds a direct
+    `tar` or `rm` back, which is exactly how the bug arrived.
+    """
+    body = _restore_script()
+
+    # Guard the search before trusting it: a pattern matching nothing would make
+    # the assertion below vacuously true, which this project has been bitten by.
+    touches = re.findall(r'^\s*(\S+(?: \S+)?) [^\n]*\$\{HOST_DATA_DIR[:?]*\}', body, re.M)
+    assert len(touches) >= 3, f"expected several HOST_DATA_DIR uses, found {touches}"
+
+    mutating = [t for t in touches if t.split()[0] in {"rm", "tar"}]
+    assert not mutating, (
+        f"these write into HOST_DATA_DIR without the namespace helper: {mutating}. "
+        "Use `inside_namespace rm ...` / `inside_namespace tar ...`."
+    )
+    assert "inside_namespace tar -xzf" in body
+    assert "inside_namespace rm -rf" in body
