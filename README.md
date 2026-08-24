@@ -1435,3 +1435,85 @@ one deliberate `SiteApp(name=...)` in a test that asserts the call is an error.
 There is a MongoDB sibling of this substrate, near-identical in shape and on
 different ports so the two can run side by side. It stayed in the holdenweb.com
 working tree when this project was extracted.
+
+### Testing a change without releasing it
+
+Releasing to test is a habit worth naming, because the cost is not the wait. A
+tag is permanent, a version number on PyPI can never be reused, and a release
+made to answer a question leaves a version in the history whose only reason for
+existing was that somebody wanted to try something. It also invites the mistake
+of treating the tag as the delivery mechanism when it is only the packaging one.
+
+Almost nothing here needs publishing to be tested.
+
+**Library code.** `uv run pytest`, and `provoke-errors.py` for the failures the
+guides quote. This is the whole of it for anything that does not touch a file a
+site copies.
+
+**Library behaviour in a running site.** This repository *is* a substrate
+instance — `test_the_repo_root_is_the_rendered_substrate` exists to keep it one
+— so `scripts/dev.sh` runs podpack against a real PostgreSQL with no containers,
+and `scripts/up.sh` runs it in them. It installs no apps, which is the right
+default: what it exercises is the framework, the substrate and the container
+suite rather than anybody's blueprint.
+
+**Substrate files** — the Containerfile, the compose files, `scripts/`,
+`alembic/env.py`, the examples. These reach a site through `podpack substrate
+upgrade`, which reads them from the *installed* podpack, and that is what makes
+a release look necessary. It is not. Every substrate subcommand takes `--from`,
+which reads a checkout, a wheel or an sdist instead:
+
+```bash
+# in a site, against podpack's working tree -- uncommitted edits included
+uv run podpack substrate status --from ~/sites/podpack
+uv run podpack substrate diff   --from ~/sites/podpack
+uv run podpack substrate upgrade --from ~/sites/podpack
+```
+
+Measured: appending a line to `substrate/data/scripts/backup.sh` in a working
+tree, committing nothing and publishing nothing, makes a site report
+`scripts/backup.sh  update available` immediately.
+
+To rehearse against exactly what a release would ship rather than what the
+working tree holds, build the artefact and read it in place:
+
+```bash
+uv build
+uv run podpack substrate status --from ~/sites/podpack/dist/podpack-*.whl
+```
+
+Both the wheel and the sdist work. What does *not* work is `uv pip install` of a
+local wheel: `uv run` re-syncs the environment from the lockfile first, so the
+install is silently undone before the command that was supposed to use it —
+measured, with only an `Uninstalled 1 package` line to say so. `--from` exists
+because of that.
+
+**A library change inside a container.** The one case that genuinely needs
+something on a remote, because the build context holds only `pyproject.toml` and
+`uv.lock` when `uv sync --frozen` runs, so a local wheel cannot be reached
+without editing the Containerfile — which is substrate-managed and would then
+conflict on every upgrade. Point the site at a commit instead:
+
+```toml
+[tool.uv.sources]
+podpack = { git = "https://github.com/holdenweb/podpack.git", rev = "<sha>" }
+```
+
+Then `uv lock --upgrade-package podpack --refresh-package podpack`. That needs a
+push and no release: no tag, no version consumed, nothing on an index that never
+forgets. The Containerfile's `git` layer exists for exactly this.
+
+**What is left that does need a release** is the release path itself — that the
+tag fires the workflow, that trusted publishing still holds, that the artefact
+installs from PyPI. Worth exercising deliberately, and worth knowing that it is
+the only thing on that list.
+
+> A worked example of getting this wrong. The fix that made `restore.sh` work on
+> Linux is a substrate file. It was tested, tagged, published as 0.9.0b3 and
+> installed, and only then delivered to the site — where it arrives as
+> `scripts/restore.sh`, committed to the *site's* repository and reaching the
+> host over git. `substrate upgrade --from` would have produced the identical
+> file with none of that. The release was not wasted, because the version floor
+> it allows stops a later plain `substrate upgrade` putting the broken script
+> back; but it was not on the path to testing, and treating it as though it were
+> cost a tag on an orphaned commit and a publish that never fired.
