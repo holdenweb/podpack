@@ -20,7 +20,7 @@ import pytest
 from pathlib import Path
 
 from alembic.config import Config
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 from podpack.migrations import AUTHORING_DIALECT, refuse_foreign_autogenerate
 
@@ -96,3 +96,93 @@ def test_the_shipped_env_never_writes_the_url_into_the_ini() -> None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
     assert "set_main_option" not in called
+
+
+def _shipped(name: str):
+    """One function out of the shipped alembic env, without running the module.
+
+    Importing it executes alembic's context at module scope, so the function is
+    lifted by AST instead. Same source, no side effects.
+    """
+    data = Path(__file__).parents[1] / "src" / "podpack" / "substrate" / "data"
+    tree = ast.parse((data / "alembic" / "env.py").read_text())
+    fn = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    )
+    namespace = {"text": text}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "env.py", "exec"), namespace)
+    return namespace[name]
+
+
+class _Connection:
+    """Just enough connection to answer the two questions the check asks."""
+
+    def __init__(self, dialect: str, **answers: object) -> None:
+        self.dialect = SimpleNamespace(name=dialect)
+        self.answers = answers
+        self.asked: list[str] = []
+
+    def execute(self, clause: object) -> SimpleNamespace:
+        sql = str(clause).strip().lower()
+        self.asked.append(sql)
+        for fragment, answer in self.answers.items():
+            if fragment in sql:
+                return SimpleNamespace(scalar=lambda answer=answer: answer)
+        raise AssertionError(f"unexpected query: {sql}")
+
+
+def test_a_search_path_naming_nothing_stops_the_migration() -> None:
+    """The state a recreated database leaves, and the message it now gets.
+
+    `db-init` creates `SCHEMA app` and sets `search_path` on the *role*, which
+    is cluster-level. The postgres image runs `db-init` only while its data
+    directory is empty, so `dropdb`/`createdb` returns a database with no `app`
+    schema and a role still pointing at it. PostgreSQL then says only "no schema
+    has been selected to create in" -- naming neither the schema, nor db-init,
+    nor that a bootstrap is missing. Two evenings went to that on a live host.
+
+    Reproduced against a real PostgreSQL while this was written: with
+    `search_path` set to a schema that does not exist, `current_schema()`
+    returns NULL and `CREATE TABLE alembic_version` raises `InvalidSchemaName`.
+    """
+    refuse = _shipped("refuse_a_missing_schema")
+    connection = _Connection(
+        "postgresql", **{"current_schema": None, "search_path": "app"}
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        refuse(connection)
+
+    message = str(raised.value)
+    # Every one of these is somewhere for the reader to go next. The whole
+    # complaint about PostgreSQL's own message is that it offers none.
+    for pointer in ("db-init", "CREATE SCHEMA", "POSTGRES_APP_USER", "restore.sh"):
+        assert pointer in message, f"the message does not mention {pointer}"
+
+
+def test_a_healthy_search_path_is_left_alone() -> None:
+    refuse = _shipped("refuse_a_missing_schema")
+    connection = _Connection("postgresql", **{"current_schema": "app"})
+
+    refuse(connection)
+
+    assert connection.asked == ["select current_schema()"], (
+        "a healthy database should cost exactly one query"
+    )
+
+
+def test_an_engine_that_is_not_postgresql_is_never_asked() -> None:
+    """`current_schema()` is not something every engine answers.
+
+    ADR-0015 wants moving to a managed database to be a change to one variable,
+    so this file stays engine-neutral. A stub that raises on any query proves
+    the check issues none.
+    """
+    refuse = _shipped("refuse_a_missing_schema")
+    connection = _Connection("sqlite")
+
+    refuse(connection)
+
+    assert connection.asked == []

@@ -13,7 +13,7 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import create_engine, pool, text
 
 from podpack.migrations import (
     refuse_foreign_autogenerate,
@@ -76,9 +76,58 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def refuse_a_missing_schema(connection) -> None:
+    """Stop, with somewhere to go, when `search_path` names nothing that exists.
+
+    PostgreSQL reports this state as `InvalidSchemaName: no schema has been
+    selected to create in`, which is true and unhelpful: it names neither the
+    schema, nor who was supposed to create it, nor why it is gone. Two evenings
+    on a live host went to it in two different disguises.
+
+    How a site arrives here. `db-init/01-create-app-user.sh` creates
+    `SCHEMA app` and then sets `search_path = app` on the *role* -- which is
+    cluster-level, and so outlives any one database. The postgres image runs
+    that script only while its data directory is empty. So `dropdb` takes the
+    schema with the database, `createdb` returns one holding only `public`, the
+    bootstrap never runs again, and the role is left pointing at a schema that
+    is not there. Nothing in the ordinary path repairs it, which is why this
+    check refuses rather than trying to.
+
+    `scripts/restore.sh` never meets this: it brings each store up alone so its
+    own bootstrap runs first. A database recreated by hand is the way in.
+    """
+    # Asked only of PostgreSQL. This file is deliberately engine-neutral --
+    # ADR-0015 wants moving to a managed database to be a change to one
+    # variable -- and `current_schema()` is not something every engine answers.
+    if connection.dialect.name != "postgresql":
+        return
+    if connection.execute(text("select current_schema()")).scalar() is not None:
+        return
+
+    search_path = connection.execute(text("show search_path")).scalar()
+    raise RuntimeError(
+        f"This connection's search_path is {search_path!r}, and no schema in it "
+        "exists. Every CREATE TABLE below would fail, starting with alembic's "
+        "own version table.\n\n"
+        "The schema is created once, by db-init/01-create-app-user.sh, which "
+        "the postgres image runs only while its data directory is empty -- so a "
+        "database that has been dropped and recreated comes back without it and "
+        "nothing runs the bootstrap again.\n\n"
+        "To repair it, connect as the superuser to this database and run:\n"
+        "    CREATE SCHEMA IF NOT EXISTS app AUTHORIZATION <the application "
+        "role>;\n"
+        "The application role is POSTGRES_APP_USER in secrets.env. Restoring "
+        "with scripts/restore.sh instead avoids this entirely: it brings each "
+        "store up alone so its own bootstrap runs first."
+    )
+
+
 def run_migrations_online() -> None:
     connectable = create_engine(db_url, poolclass=pool.NullPool)
     with connectable.connect() as connection:
+        # Before anything else touches the database: the failure this catches is
+        # terminal for the site, because `web` is gated on `migrate` completing.
+        refuse_a_missing_schema(connection)
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
