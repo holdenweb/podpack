@@ -133,10 +133,11 @@ Refusing to edit `.env` was only ever collateral, and `.env` holds no secret.
 
 **The bug that started this becomes preventable rather than merely fixed.** A
 configurator that asks *"is anything proxying to this site?"* and *"what address
-do visitors use?"* would have caught the `http://` reset links outright, and
-catches them on every future rebuild. Of everything this work produced, an
-editor that asks is the only mechanism that addresses the original fault rather
-than its symptom.
+do visitors use?"* would have clarified the requirement, and puts that question
+in front of an operator on every future rebuild. It cannot guarantee a right
+answer; it can stop the question going unasked, which is what happened here. Of
+everything this work produced, an editor that asks is the only mechanism that
+addresses the original fault rather than its symptom.
 
 Against that: every existing deployment must edit `.env` by hand, once. There
 are three, all on one host, and the boot-time check above is what makes a missed
