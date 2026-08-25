@@ -699,3 +699,118 @@ def test_the_summary_names_where_the_backup_came_from(tmp_path: Path) -> None:
 
     assert "source directory: /tmp/restore-rehearsal" in out, out
     assert "from host:        opal17" in out, out
+
+
+def _backup_script() -> str:
+    return _substrate_script("backup.sh").read_text()
+
+
+def _run_tree_guard(tmp_path: Path, destination: str) -> tuple[int, str]:
+    """Run backup.sh's inside-the-tree refusal, and nothing else.
+
+    Lifted between landmarks and executed rather than read, because what this
+    guard *says* and what it *does* were different things for as long as it
+    existed.
+    """
+    import subprocess
+
+    body = _backup_script()
+    start = body.index("resolve() {")
+    end = body.index("esac", start) + len("esac")
+
+    site = tmp_path / "site"
+    site.mkdir()
+    script = tmp_path / "guard.sh"
+    script.write_text(
+        "set -euo pipefail\n"
+        f'here="{site}"\n'
+        f'root="{tmp_path}/backups"\n'
+        + body[start:end]
+        + '\necho ALLOWED\n'
+    )
+    done = subprocess.run(
+        ["bash", str(script), destination], cwd=site, capture_output=True, text=True
+    )
+    return done.returncode, done.stdout + done.stderr
+
+
+def test_a_destination_inside_the_tree_is_refused_before_it_exists(
+    tmp_path: Path,
+) -> None:
+    """The guard used to fire only *after* the damage it prevents.
+
+    It resolved the destination with `$(cd "$(dirname ...)" && pwd)`. When the
+    parent did not exist the `cd` failed, `&& pwd` never ran, the substitution
+    was empty and the case word became `/` -- which matches nothing, so the
+    backup went ahead and wrote a verbatim secrets.env into the working tree.
+    `set -e` does not catch it: a command substitution that fails inside a
+    `case` word is not a checked command.
+
+    Demonstrated while this was written: the first run into a missing directory
+    reported success, and the second run of the identical command -- the parent
+    now existing -- refused. Rehearsal 1 printed `cd: /home/sholden/backups: No
+    such file or directory` and carried on beneath it.
+    """
+    code, out = _run_tree_guard(tmp_path, str(tmp_path / "site" / "backups" / "demo"))
+
+    assert code == 1, out
+    assert "refusing to write a backup inside the site directory" in out
+    assert "ALLOWED" not in out
+
+
+def test_the_site_directory_itself_is_refused(tmp_path: Path) -> None:
+    """The same line was also off by one level.
+
+    It resolved `dirname` of the destination rather than the destination, so an
+    absolute path naming the site directory resolved to the site's *parent*,
+    matched nothing, and was allowed -- putting the backup directly in the tree.
+    """
+    code, out = _run_tree_guard(tmp_path, str(tmp_path / "site"))
+
+    assert code == 1, out
+    assert "ALLOWED" not in out
+
+
+def test_a_destination_outside_the_tree_is_still_allowed(tmp_path: Path) -> None:
+    """The guard has to stay usable: BACKUP_ROOT's default does not exist either."""
+    code, out = _run_tree_guard(tmp_path, str(tmp_path / "backups" / "holdenweb-com"))
+
+    assert code == 0, out
+    assert "ALLOWED" in out
+
+
+def test_the_cross_deployment_guard_reconstructs_no_names() -> None:
+    """It was inert on every site whose name did not begin `holdenweb`.
+
+    It looked for a mount whose destination was `/var/lib/${project%%-*}/apps`
+    -- a container path rebuilt from the site name, while compose.yaml hardcodes
+    `/var/lib/holdenweb/apps` for every site (item 18). And it rebuilt the
+    container name as `${project}-web-1`, which compose normalises (dots
+    stripped, dashes kept), so a dotted site name found no container at all and
+    the `-n` test passed in silence.
+
+    Measured: of holdenweb-com, holdenweb.com and mysite, only the first names a
+    container podman can find.
+    """
+    # Comments stripped first. The comment above this guard explains the old
+    # bug, so it necessarily contains the pattern being searched for -- the same
+    # way test_the_shipped_env_never_writes_the_url_into_the_ini once failed on
+    # its own documentation.
+    body = "\n".join(
+        line
+        for line in _backup_script().splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+    # Guard the search before trusting it: `project` must still be a live
+    # variable in this script, or the assertions below prove nothing.
+    assert 'project="${SITE_NAME:-podpack}"' in body
+
+    assert "${project%%-*}" not in body, (
+        "the guard is rebuilding a container path from the site name again"
+    )
+    assert '"${project}-web-1"' not in body, (
+        "the guard is rebuilding a container name from the site name again"
+    )
+    # Asked of compose, which resolves its own project, rather than reconstructed.
+    assert 'ps -q web' in body

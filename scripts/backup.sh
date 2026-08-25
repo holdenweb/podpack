@@ -51,8 +51,36 @@ dest="${1:-$root}/${stamp}"
 # ends up holding a verbatim copy of every secret the site has, and a directory
 # of credentials inside a repository is one careless `git add` away from being
 # published.
-case "$(cd "$(dirname "${1:-$root}")" && pwd)/" in
-    "${here}/"*) echo "refusing to write a backup inside the site directory:" >&2
+#
+# This used to ask the filesystem to resolve a path that need not exist yet, and
+# failed open twice over.
+#
+#   When the destination's parent did not exist, `cd` failed, `&& pwd` never
+#   ran, the substitution was empty and the case word became `/` -- matching
+#   nothing, so the backup went ahead. `set -e` does not catch it: a command
+#   substitution that fails inside a `case` word is not a checked command, where
+#   the same substitution in an assignment aborts. Demonstrated end to end: the
+#   first run into a missing directory wrote secrets.env inside the working tree
+#   and reported success, and the second run of the identical command -- the
+#   parent now existing -- refused. Rehearsal 1 printed `cd: /home/sholden/
+#   backups: No such file or directory` and carried on underneath it.
+#
+#   And it resolved `dirname` of the destination rather than the destination, so
+#   an absolute path naming the site directory itself resolved to the site's
+#   *parent*, matched nothing, and was allowed.
+#
+# `realpath` answers for a path that does not exist, which removes the reason
+# `dirname` was there at all. Symlinks are followed deliberately: a link
+# pointing into the tree puts secrets in the tree. Assignments rather than a
+# substitution in the case word, so that a failure here aborts instead of
+# passing -- a guard that fails open is worse than no guard, because it is
+# trusted, and operations.md states this refusal as a guarantee.
+resolve() { python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+dest_root="$(resolve "${1:-$root}")"
+site_root="$(resolve "$here")"
+case "${dest_root}/" in
+    "${site_root}/"*) echo "refusing to write a backup inside the site directory:" >&2
+                 echo "  ${dest_root}" >&2
                  echo "  it would contain secrets.env in clear. Set BACKUP_ROOT." >&2
                  exit 1 ;;
 esac
@@ -71,16 +99,44 @@ fi
 # data looks complete, restores without error, and produces a site whose schema
 # does not match its content. pp-testing's copy of this found exactly that, in
 # its own repository, the first time it ran.
-data_root_abs="$(cd "${HOST_DATA_DIR}" && pwd)"
-mounted_from="$(
-    podman inspect --format \
-        '{{range .Mounts}}{{if eq .Destination "/var/lib/'"${project%%-*}"'/apps"}}{{.Source}}{{end}}{{end}}' \
-        "${project}-web-1" 2>/dev/null || true
-)"
-if [[ -n "$mounted_from" && "$mounted_from" != "${data_root_abs}/apps" ]]; then
-    echo "REFUSING: '${project}-web-1' does not belong to this directory." >&2
-    echo "  its app data:      ${mounted_from}" >&2
-    echo "  this deployment's: ${data_root_abs}/apps" >&2
+# Asked source-side, because the source is the only side that identifies a
+# deployment. This used to look for a mount whose *destination* was
+# /var/lib/${project%%-*}/apps and read its source -- rebuilding a container
+# path out of the site name, while compose.yaml hardcodes
+# /var/lib/holdenweb/apps for every site (backlog 18). So it matched only where
+# the site name's first dash-separated segment was literally `holdenweb`, and
+# was inert on `mysite`, on `podpack-demo`, and on `holdenweb.com` -- which was
+# the one deployment where two checkouts were ever live at once. It rebuilt the
+# container name from the site name too, and compose normalises that (dots
+# stripped, dashes kept), so a dotted name found no container at all and the
+# `-n` test then passed in silence.
+#
+# Now compose says which container is this project's `web` and podman says what
+# it mounts; neither the site name nor any path inside the container appears.
+# The comparison is made by python on both sides, so a symlinked data root
+# cannot produce a false refusal.
+#
+# It fails closed. pp-testing's original had no `-n "$mounted_from"` clause and
+# this port added one; an unanswerable question is now a refusal, which is the
+# whole argument of the guard above.
+web_container="$("${compose[@]}" ps -q web 2>/dev/null | head -1)"
+if [[ -z "$web_container" ]]; then
+    echo "REFUSING: compose will not say which container is this project's web," >&2
+    echo "  so nothing here can prove the containers belong to this directory." >&2
+    exit 1
+fi
+mounts="$(podman inspect --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' \
+    "$web_container" 2>/dev/null || true)"
+if ! printf '%s\n' "$mounts" | python3 -c '
+import os, sys
+want = os.path.realpath(sys.argv[1])
+sys.exit(0 if any(os.path.realpath(line.strip()) == want
+                  for line in sys.stdin if line.strip()) else 1)
+' "${HOST_DATA_DIR}/apps"; then
+    echo "REFUSING: the running web container does not mount this directory's app data." >&2
+    echo "  this deployment's: $(resolve "${HOST_DATA_DIR}/apps")" >&2
+    echo "  the container mounts:" >&2
+    printf '%s\n' "$mounts" | sed '/^$/d; s/^/    /' >&2
     echo "Another deployment is using this compose project name." >&2
     exit 1
 fi
