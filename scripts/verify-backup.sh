@@ -106,6 +106,56 @@ if [[ -s "${backup}/rowcounts.txt" ]]; then
         echo "  NOTE: every table is empty. Right for a site that has no data yet;"
         echo "        alarming for one that had some yesterday. Only you know which."
     fi
+
+    # Against the backup before this one, which is the only reference this tool
+    # has for what "normal" looks like here.
+    #
+    # A restore that aborts leaves a site somebody then brings up anyway, and
+    # podpack seeds `pages` from what the apps ship. A backup of *that* is three
+    # bytes and one row from the real thing -- measured: 1036570 against
+    # 1036573, five rows against four -- and both verify clean. Because it is
+    # newer it becomes what `verify-backup.sh` with no argument reaches for, and
+    # what anybody asking for "the latest backup" gets.
+    #
+    # A count going down is the signal. It is a remark and not a failure: rows
+    # are deleted legitimately, and a check that cried wolf here is a check
+    # people learn to skip. Counts going up say nothing and are not mentioned.
+    #
+    # Only when this backup sits among the others. A named directory
+    # somewhere else has no meaningful neighbour, and guessing one would be
+    # worse than saying nothing. String test rather than a resolved path,
+    # because `$(cd "$(dirname ...)" && pwd)` fails open when the parent is
+    # missing -- the defect this project already has open against backup.sh.
+    case "$backup" in
+    "${root}/"*)
+        previous="$(ls -1 "$root" 2>/dev/null | sort | awk -v cur="$(basename "$backup")" '
+            $0 == cur { print prev; exit } { prev = $0 }')"
+        ;;
+    *) previous="" ;;
+    esac
+
+    if [[ -n "$previous" && -s "${root}/${previous}/rowcounts.txt" ]]; then
+        fallen="$(awk -F'|' '
+            NR == FNR { was[$1 "." $2] = $3; next }
+            ($1 "." $2) in was && $3 + 0 < was[$1 "." $2] + 0 {
+                printf "        %s.%s  %s -> %s\n", $1, $2, was[$1 "." $2], $3
+            }' "${root}/${previous}/rowcounts.txt" "${backup}/rowcounts.txt")"
+        gone="$(awk -F'|' '
+            NR == FNR { now[$1 "." $2] = 1; next }
+            !(($1 "." $2) in now) { printf "        %s.%s  had %s\n", $1, $2, $3
+            }' "${backup}/rowcounts.txt" "${root}/${previous}/rowcounts.txt")"
+
+        if [[ -n "$fallen" || -n "$gone" ]]; then
+            echo "  NOTE: this backup holds less than ${previous} did."
+            [[ -n "$fallen" ]] && { echo "        fewer rows in:"; printf '%s\n' "$fallen"; }
+            [[ -n "$gone" ]] && { echo "        tables that have gone entirely:"; printf '%s\n' "$gone"; }
+            echo "        Deletions look exactly like this. So does a backup of a site"
+            echo "        that was seeded rather than restored. Establish which before"
+            echo "        this becomes the copy you reach for."
+        else
+            echo "  compared with ${previous}: no table has fewer rows"
+        fi
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -138,4 +188,4 @@ fi
 
 echo
 echo "VERIFIED: ${backup}"
-grep -E '^(taken|git commit|alembic revision|services):' "${backup}/manifest.txt" | sed 's/^/  /'
+grep -E '^(taken|from host|source directory|git commit|alembic revision|services):' "${backup}/manifest.txt" | sed 's/^/  /'

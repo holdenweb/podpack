@@ -104,16 +104,53 @@ fi
 # SECURITY_PASSWORD_SALT and every stored password becomes unverifiable, change
 # the database identity and the site cannot reach its own data.
 #
-# .env is per-host, so a restore onto a *different* host wants the existing one
-# kept and edited instead. Both are preserved beside their replacements rather
-# than overwritten, because getting this wrong at 2am should be recoverable.
+# .env is the opposite, and replacing it was this script's worst bug. It holds
+# ports, host paths, SELinux flags and SITE_NAME -- which *is* the compose
+# project name -- so installing the backup's over this host's handed every
+# later compose command in this directory the backup's project. Measured on a
+# real host: a restore into a checkout called `holdenweb-staging` drove
+# containers called `holdenweb-com`, and a `compose up -d` from there would
+# have recreated production from staging's definitions. The comment that used
+# to sit here said an existing .env "wants keeping and editing instead", and
+# the code beneath it did the reverse for as long as it existed.
+#
+# So an existing .env is now kept untouched, and the backup's is put beside it
+# to be read rather than applied. Only a checkout that has none -- a fresh
+# clone, which is the disaster this script exists for -- gets the backup's
+# installed, with every value in it that describes the old host named on the
+# way past.
 # ---------------------------------------------------------------------------
 suffix="superseded-$(date -u +%Y%m%dT%H%M%SZ)"
-for f in .env secrets.env; do
-    [[ -f "$f" ]] && cp "$f" "${f}.${suffix}" && echo "kept the existing ${f} as ${f}.${suffix}"
-done
-install -m 600 "$backup/env" .env
+if [[ -f secrets.env ]]; then
+    cp secrets.env "secrets.env.${suffix}"
+    echo "kept the existing secrets.env as secrets.env.${suffix}"
+fi
 install -m 600 "$backup/secrets.env" secrets.env
+
+# The keys in .env that describe the host rather than the site. Every one of
+# them has been wrong on a real restore at least once.
+per_host=(SITE_NAME WEB_HOST_PORT WEB_BIND_ADDR HOST_DATA_DIR HOST_LOG_DIR
+          VOLUME_RW VOLUME_RO PODPACK_PROXY_HOPS)
+
+if [[ -f .env ]]; then
+    install -m 600 "$backup/env" .env.from-backup
+    echo "kept this host's .env; the backup's is beside it as .env.from-backup"
+    # Only the keys that legitimately differ between hosts, and only where they
+    # actually do. Two identical files deserve no output at all.
+    for key in "${per_host[@]}"; do
+        mine="$(grep -m1 "^${key}=" .env || true)"
+        theirs="$(grep -m1 "^${key}=" .env.from-backup || true)"
+        [[ "$mine" == "$theirs" ]] && continue
+        echo "    ${key}: keeping ${mine:-<unset>}, backup had ${theirs:-<unset>}"
+    done
+else
+    install -m 600 "$backup/env" .env
+    echo "no .env here, so the backup's was installed. These describe the host it"
+    echo "came from, and want checking before this site answers anywhere else:"
+    for key in "${per_host[@]}"; do
+        echo "    $(grep -m1 "^${key}=" .env || echo "${key}=<unset>")"
+    done
+fi
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 
@@ -290,11 +327,12 @@ echo "restore complete, and checked."
 # ignoring these. One of them is a verbatim copy of secrets.env.
 # `find` rather than a glob: a leading `*` does not match a leading dot, so
 # `./*.superseded-*` silently listed secrets.env's copy and not .env's.
-kept="$(find . -maxdepth 1 -name '*.superseded-*' | sort)"
+kept="$(find . -maxdepth 1 \( -name '*.superseded-*' -o -name '.env.from-backup' \) | sort)"
 if [[ -n "$kept" ]]; then
     echo
-    echo "the previous .env and secrets.env were kept as:"
+    echo "this restore set these aside for you to read:"
     echo "$kept"
-    echo "delete them once you are satisfied -- one is a copy of every secret"
-    echo "this site has, and it is not ignored on sites older than this script."
+    echo "delete them once you are satisfied -- secrets.env.superseded-* is a copy"
+    echo "of every secret this site has, and none of these is ignored on sites"
+    echo "older than this script."
 fi

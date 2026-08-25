@@ -496,3 +496,206 @@ def test_restore_touches_the_data_directory_only_inside_the_namespace() -> None:
     )
     assert "inside_namespace tar -xzf" in body
     assert "inside_namespace rm -rf" in body
+
+
+def _substrate_script(name: str) -> Path:
+    from podpack import substrate
+
+    return Path(substrate.__file__).parent / "data" / "scripts" / name
+
+
+def _run_restore_env_block(tmp_path: Path, existing_env: str | None) -> str:
+    """Run restore.sh's .env/secrets.env handling, and nothing else.
+
+    Lifted out of the shipped script between two stable landmarks rather than
+    asserted as text: the bug this guards was a *behaviour* -- the file the
+    script left behind -- and reading the source is what missed it for as long
+    as it existed. The block ends by sourcing `.env`, so the values echoed
+    afterwards are the ones every later compose command would use.
+    """
+    body = _restore_script()
+    start = body.index('suffix="superseded-')
+    end = body.index("set -a; . ./.env; set +a") + len("set -a; . ./.env; set +a")
+
+    backup = tmp_path / "backup"
+    backup.mkdir()
+    (backup / "env").write_text(
+        "SITE_NAME=holdenweb-com\nWEB_HOST_PORT=3427\nPODPACK_PROXY_HOPS=1\n"
+    )
+    # A shape, not a credential: the test asserts nothing about the contents,
+    # and a restore only ever copies this file.
+    (backup / "secrets.env").write_text("POSTGRES_PASSWORD=test-scratch\n")
+
+    site = tmp_path / "site"
+    site.mkdir()
+    if existing_env is not None:
+        (site / ".env").write_text(existing_env)
+
+    script = tmp_path / "block.sh"
+    script.write_text(
+        "set -euo pipefail\n"
+        'backup="$1"\n'
+        + body[start:end]
+        + '\necho "PROJECT=${SITE_NAME}"\necho "PORT=${WEB_HOST_PORT}"\n'
+    )
+    import subprocess
+
+    return subprocess.run(
+        ["bash", str(script), str(backup)],
+        cwd=site,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_a_restore_keeps_the_host_s_own_env(tmp_path: Path) -> None:
+    """The value of `.env` belongs to the host, and a restore must not import it.
+
+    `.env` carries SITE_NAME, which *is* the compose project name. Installing
+    the backup's over the host's handed every later compose command in the
+    directory the backup's project: measured on a real host, a restore into a
+    checkout called `holdenweb-staging` drove containers called `holdenweb-com`,
+    and a `compose up -d` from there would have recreated production. The old
+    script's own comment said an existing `.env` "wants keeping and editing
+    instead", and the code beneath it did the reverse.
+    """
+    out = _run_restore_env_block(
+        tmp_path, "SITE_NAME=holdenweb-staging\nWEB_HOST_PORT=15055\n"
+    )
+
+    assert "PROJECT=holdenweb-staging" in out, out
+    assert "PROJECT=holdenweb-com" not in out
+    # The old host's port is what made the script's own closing health check
+    # fail on exactly the occasion it exists for -- a move to a new host.
+    assert "PORT=15055" in out, out
+    # Kept where it can be read and compared, rather than discarded.
+    assert (tmp_path / "site" / ".env.from-backup").exists()
+    assert "SITE_NAME: keeping" in out
+
+
+def test_a_fresh_clone_takes_the_backup_s_env_and_is_told_what_is_in_it(
+    tmp_path: Path,
+) -> None:
+    """The disaster case: no `.env` to keep, so the backup's is all there is.
+
+    It is installed, because a site with no `.env` cannot start -- but every
+    value in it that describes the machine the backup came from is named, since
+    each one is wrong until somebody looks.
+    """
+    out = _run_restore_env_block(tmp_path, existing_env=None)
+
+    assert "PROJECT=holdenweb-com" in out, out
+    for key in ("SITE_NAME", "WEB_HOST_PORT", "HOST_DATA_DIR", "PODPACK_PROXY_HOPS"):
+        assert key in out, f"{key} was installed without being named"
+    assert not (tmp_path / "site" / ".env.from-backup").exists()
+
+
+def _backup_dir(root: Path, stamp: str, user_rows: int, source: str) -> Path:
+    """A backup with just enough in it for verify-backup.sh to read it through."""
+    import json
+    import subprocess
+    import tarfile
+
+    d = root / stamp
+    d.mkdir(parents=True)
+    (d / "rowcounts.txt").write_text(
+        "app|alembic_version|1\napp|role|1\napp|roles_users|1\n"
+        f"app|user|{user_rows}\n"
+    )
+    (d / "manifest.txt").write_text(
+        f"taken:            {stamp}\n"
+        "from host:        opal17\n"
+        f"source directory: {source}\n"
+        "git commit:       0123456789abcdef\n"
+        "alembic revision: a1b2c3d4\n"
+        "services:         (none)\n"
+    )
+    # No services, so the loop that needs a running stack is skipped entirely
+    # and the script can be driven for real without one.
+    (d / "plan.json").write_text(
+        json.dumps({"services": [], "apps": [{"name": "pages", "data": True}]})
+    )
+    (d / "secrets.env").write_text("POSTGRES_PASSWORD=test-scratch\n")
+    (d / "env").write_text("SITE_NAME=scratch\n")
+    payload = root / f".payload-{stamp}"
+    payload.mkdir()
+    (payload / "f").write_text("x")
+    with tarfile.open(d / "app-data.tar.gz", "w:gz") as tar:
+        tar.add(payload, arcname=".")
+    subprocess.run(["true"], check=True)
+    return d
+
+
+def _run_verify(tmp_path: Path, *args: str) -> str:
+    import shutil
+    import subprocess
+
+    site = tmp_path / "site"
+    (site / "scripts").mkdir(parents=True)
+    shutil.copy(_substrate_script("verify-backup.sh"), site / "scripts")
+    root = site / "backups" / "scratch"
+    (site / ".env").write_text(f"SITE_NAME=scratch\nBACKUP_ROOT={root}\n")
+    return subprocess.run(
+        ["bash", "scripts/verify-backup.sh", *args],
+        cwd=site,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_a_backup_holding_less_than_the_one_before_it_is_remarked_on(
+    tmp_path: Path,
+) -> None:
+    """The failed-rehearsal backup, and why nothing could tell it apart.
+
+    A restore aborts, somebody brings the site up to look at it, podpack seeds
+    `pages` from what the apps ship, and a backup is taken. Measured on a real
+    host: 1036570 bytes against 1036573, five rows against four, and both
+    VERIFIED. Because it is newer it becomes what this script reaches for with
+    no argument, and what anybody asking for "the latest backup" gets.
+
+    A fall is a remark and not a failure -- rows are deleted legitimately, and a
+    check that cried wolf here is one people learn to skip.
+    """
+    site = tmp_path / "site"
+    root = site / "backups" / "scratch"
+    _backup_dir(root, "20260824T100000Z", 2, "/home/sholden/apps/holdenweb-com")
+    _backup_dir(root, "20260824T110000Z", 1, "/tmp/restore-rehearsal")
+
+    out = _run_verify(tmp_path)
+
+    assert "20260824T110000Z" in out, "the newest should be the one chosen"
+    assert "app.user  2 -> 1" in out, out
+    assert "seeded rather than restored" in out
+    assert "VERIFIED" in out, "a fall is a remark, not a failure"
+
+
+def test_a_backup_that_has_grown_says_so_without_alarm(tmp_path: Path) -> None:
+    site = tmp_path / "site"
+    root = site / "backups" / "scratch"
+    _backup_dir(root, "20260824T100000Z", 2, "/home/sholden/apps/holdenweb-com")
+    _backup_dir(root, "20260824T110000Z", 9, "/home/sholden/apps/holdenweb-com")
+
+    out = _run_verify(tmp_path)
+
+    assert "no table has fewer rows" in out, out
+    assert "NOTE" not in out
+
+
+def test_the_summary_names_where_the_backup_came_from(tmp_path: Path) -> None:
+    """`source directory:` is the one recorded field that separated the two.
+
+    It was in every manifest all along and the closing summary's regex left it
+    out, so the fact that a backup had been taken from a rehearsal clone was
+    written down and never shown.
+    """
+    site = tmp_path / "site"
+    root = site / "backups" / "scratch"
+    _backup_dir(root, "20260824T100000Z", 2, "/tmp/restore-rehearsal")
+
+    out = _run_verify(tmp_path)
+
+    assert "source directory: /tmp/restore-rehearsal" in out, out
+    assert "from host:        opal17" in out, out
