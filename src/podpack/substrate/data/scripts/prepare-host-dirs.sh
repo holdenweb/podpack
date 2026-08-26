@@ -21,6 +21,46 @@ done
 # shellcheck disable=SC1091
 set -a; . ./.env; set +a
 
+# A deployment that is not a lab has no business keeping its data inside a git
+# working tree. `hostdata/` and `hostlogs/` are gitignored, so nothing is at
+# risk of being committed -- what is at risk is the data itself, to a
+# `git clean -fdx`, a fresh clone, or a rebuild that removes the directory
+# before recreating it. holdenweb.com's own rebuild script does exactly that.
+#
+# Unset means `local`. Every site created before PODPACK_ENVIRONMENT existed is
+# effectively a lab as far as this check is concerned, and breaking them on an
+# upgrade to make a point would be the wrong trade; they receive the variable
+# append-only on that same upgrade and can then say otherwise.
+#
+# Anything unrecognised counts as NOT local, and that direction is deliberate.
+# A typo -- `Local`, `prod`, a trailing space -- costs a developer one refusal
+# that says what to do. The opposite lets a real deployment keep its data in
+# the checkout because somebody misspelt the word, which is the failure nobody
+# would find until the directory went away.
+environment="${PODPACK_ENVIRONMENT:-local}"
+if [[ "$environment" != "local" ]]; then
+    # realpath by python, not `cd ... && pwd`: these directories legitimately
+    # do not exist yet -- creating them is what this script is for -- and that
+    # idiom fails open on a missing path. backup.sh carried that defect for a
+    # week.
+    resolve() { python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+    site_root="$(resolve "$here")"
+    for name in HOST_DATA_DIR HOST_LOG_DIR; do
+        case "$(resolve "${!name}")/" in
+            "${site_root}/"*)
+                echo "PODPACK_ENVIRONMENT=${environment}, so this is not a lab, and" >&2
+                echo "  ${name}=${!name}" >&2
+                echo "  resolves to $(resolve "${!name}")," >&2
+                echo "  which is inside the checkout at ${site_root}." >&2
+                echo >&2
+                echo "Point it somewhere the checkout does not own -- /srv/<site>/data and" >&2
+                echo "/var/log/<site> are the shapes .env suggests. Set PODPACK_ENVIRONMENT" >&2
+                echo "to 'local' if this really is a lab." >&2
+                exit 1 ;;
+        esac
+    done
+fi
+
 # Note what is *not* here, in either direction.
 #
 # $HOST_DATA_DIR/postgres/pgdata is absent because PostgreSQL insists its data

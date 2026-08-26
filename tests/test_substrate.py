@@ -992,3 +992,107 @@ def test_an_artefact_that_carries_no_substrate_is_refused(tmp_path: Path) -> Non
     with ExitStack() as stack:
         with pytest.raises(RuntimeError, match="no podpack substrate"):
             substrate.source_root_from(empty, stack)
+
+
+def _prepare_host_dirs(tmp_path: Path, environment: str | None, data_dir: str):
+    """Run the shipped prepare-host-dirs.sh against a scratch site.
+
+    Executed rather than read: what this guard does is refuse, and a refusal is
+    only observable by asking for one.
+    """
+    import os
+    import subprocess
+
+    site = tmp_path / "site"
+    (site / "scripts").mkdir(parents=True, exist_ok=True)
+    script = DATA_ROOT / "scripts" / "prepare-host-dirs.sh"
+    target = site / "scripts" / "prepare-host-dirs.sh"
+    target.write_text(script.read_text())
+    target.chmod(0o755)
+    # So the script's first step -- copying the examples into place -- is a
+    # no-op rather than the thing the test accidentally measures. It is, and an
+    # earlier version of this harness died there and reported it as a refusal.
+    (site / "secrets.env").write_text("POSTGRES_PASSWORD=test-scratch\n")
+
+    lines = [f"HOST_DATA_DIR={data_dir}", f"HOST_LOG_DIR={data_dir}-logs"]
+    if environment is not None:
+        lines.append(f"PODPACK_ENVIRONMENT={environment}")
+    (site / ".env").write_text("\n".join(lines) + "\n")
+
+    # A stub podman, so the Linux-only `podman unshare chown` at the end of the
+    # script does not decide whether this test can run.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / "podman").write_text("#!/bin/sh\nexit 0\n")
+    (bin_dir / "podman").chmod(0o755)
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
+
+    return subprocess.run(
+        ["bash", "scripts/prepare-host-dirs.sh"],
+        cwd=site, capture_output=True, text=True, env=env,
+    )
+
+
+def test_a_deployment_that_is_not_a_lab_refuses_data_inside_the_checkout(
+    tmp_path: Path,
+) -> None:
+    """`hostdata/` is right for a lab and wrong for anything anybody depends on.
+
+    It is gitignored, so nothing is at risk of being committed. What is at risk
+    is the data: a `git clean -fdx`, a fresh clone, or a rebuild that removes
+    the directory before recreating it -- which holdenweb.com's own rebuild
+    script does -- takes the site's content with it.
+    """
+    done = _prepare_host_dirs(tmp_path, "production", "./hostdata")
+
+    assert done.returncode == 1, done.stdout + done.stderr
+    message = done.stdout + done.stderr
+    assert "PODPACK_ENVIRONMENT=production" in message
+    assert "HOST_DATA_DIR=./hostdata" in message
+    # A refusal that does not say what to do instead is a refusal people work
+    # around rather than act on.
+    assert "local" in message and "/srv/" in message
+
+
+def test_a_lab_keeps_its_data_in_the_checkout_and_is_not_troubled(
+    tmp_path: Path,
+) -> None:
+    done = _prepare_host_dirs(tmp_path, "local", "./hostdata")
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (tmp_path / "site" / "hostdata" / "apps").is_dir()
+
+
+def test_an_unset_environment_means_local_so_existing_sites_do_not_break(
+    tmp_path: Path,
+) -> None:
+    """Every site created before this variable existed has no line for it.
+
+    They receive one append-only on their next `podpack substrate upgrade`.
+    Refusing in the meantime would break working deployments to make a point.
+    """
+    done = _prepare_host_dirs(tmp_path, None, "./hostdata")
+
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_an_unrecognised_environment_counts_as_not_local(tmp_path: Path) -> None:
+    """The failure direction, chosen deliberately.
+
+    `Local`, `prod`, or a trailing space costs a developer one explanatory
+    refusal. The opposite would let a real deployment keep its data in the
+    checkout because somebody misspelt the word -- a failure nobody finds until
+    the directory goes away.
+    """
+    for typo in ("Local", "prod", "production "):
+        done = _prepare_host_dirs(tmp_path, typo, "./hostdata")
+        assert done.returncode == 1, f"{typo!r} was treated as a lab"
+
+
+def test_roots_outside_the_checkout_are_fine_for_any_environment(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path / "elsewhere" / "data"
+    for environment in ("production", "staging", "local", None):
+        done = _prepare_host_dirs(tmp_path, environment, str(outside))
+        assert done.returncode == 0, done.stdout + done.stderr

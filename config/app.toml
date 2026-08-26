@@ -6,7 +6,6 @@
 
 [site]
 name = "holdenweb.com (podman PostgreSQL lab)"
-environment = "local"
 # The address the *world* uses, for links that have to be absolute and are
 # built with no request to take a Host header from -- mail sent from a job, a
 # feed, a CLI command. Read with `podpack.absolute_url()`.
