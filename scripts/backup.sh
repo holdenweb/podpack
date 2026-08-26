@@ -339,11 +339,20 @@ revision="$("${compose[@]}" exec -T postgres sh -c \
 # that moved on without a rebuild leaves the site serving the previous commit;
 # when this disagrees with `git commit:` below, the data was produced by the
 # build named here, and that is the one to restore onto.
+# Asked of the container rather than of /_status, which answers 404 to anyone
+# who is not an administrator -- so the `||` fallback fired every single time
+# and every manifest ever written recorded UNKNOWN. The field was not merely
+# unreliable; it had never once been populated.
+#
+# `podman inspect` reads the stamp straight off the running container, with no
+# session and no port. $web_container was resolved above by asking compose,
+# which is also what makes this work when the project name has been normalised.
 running_build="$(
-    curl -s --max-time 5 "http://${WEB_BIND_ADDR:-127.0.0.1}:${WEB_HOST_PORT}/_status" 2>/dev/null \
-        | python3 -c 'import json,sys; print(json.load(sys.stdin)["build_commit"])' 2>/dev/null \
-        || echo "UNKNOWN (not readable when this was taken; /_status wants an admin)"
+    podman inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+        "$web_container" 2>/dev/null \
+        | sed -n 's/^PODPACK_BUILD_COMMIT=//p' | head -1
 )"
+running_build="${running_build:-UNKNOWN (the web container did not report a build stamp)}"
 
 {
     echo "podpack site backup"

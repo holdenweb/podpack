@@ -1172,3 +1172,68 @@ def test_no_shipped_container_path_is_named_after_a_site() -> None:
                 offenders.append(f"{path.relative_to(DATA_ROOT)}: {match}")
 
     assert not offenders, "container paths still named after a site: " + "; ".join(offenders)
+
+
+def test_only_one_service_builds_the_web_image() -> None:
+    """`migrate` and `web` shared a tag and both declared `build:`.
+
+    So one `up --build` walked the Containerfile twice and tagged the same name
+    twice -- 8.3s of the 91s an `up` took on a warm cache, and four passes
+    during a full rebuild, since restore.sh runs its own `up -d --build` first.
+
+    Safe despite `web` depending on `migrate` rather than the reverse: compose
+    builds every service declaring `build:` before starting any of them.
+    Verified from nothing rather than reasoned about -- image removed, `up.sh`
+    run, one build pass, and migrate Created/Started/Exited against the image
+    web's build had just produced.
+    """
+    import re
+
+    compose = (DATA_ROOT / "compose.yaml").read_text()
+
+    service = None
+    builds, images = set(), {}
+    for line in compose.splitlines():
+        named = re.match(r"^  ([a-z][a-z0-9-]*):\s*$", line)
+        if named:
+            service = named.group(1)
+        elif re.match(r"^    build:\s*$", line):
+            builds.add(service)
+        else:
+            tagged = re.match(r"^    image:\s*(\S+)\s*$", line)
+            if tagged:
+                images[service] = tagged.group(1)
+
+    # Guard the parse before trusting it: finding no services at all would make
+    # every assertion below vacuously true.
+    assert "web" in images and "migrate" in images, images
+
+    assert images["migrate"] == images["web"], (
+        "they no longer share a tag, which changes what this test is about"
+    )
+    assert builds == {"web"}, f"more than one service builds the web image: {builds}"
+
+
+def test_the_build_stamp_is_asked_of_the_container() -> None:
+    """`running build:` had never once been populated.
+
+    backup.sh fetched it by curling /_status, which answers 404 to anyone who
+    is not an administrator, so the `||` fallback fired every time and every
+    manifest ever written recorded UNKNOWN. Confirmed against a real one.
+
+    Comments stripped: the comment above the fix explains the old mechanism and
+    so contains the word being searched for. That is the fourth test here to
+    need this.
+    """
+    body = "\n".join(
+        line
+        for line in (DATA_ROOT / "scripts" / "backup.sh").read_text().splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+    assert "running_build=" in body, "the field is gone; this test is about how it is filled"
+    stanza = body.split("running_build=", 1)[1].split("\n{", 1)[0]
+
+    assert "_status" not in stanza, "the build stamp is being fetched from /_status again"
+    assert "PODPACK_BUILD_COMMIT" in stanza
+    assert "podman inspect" in stanza

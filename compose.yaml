@@ -70,13 +70,23 @@ services:
   # It needs no data or log mounts: building the target metadata imports the
   # installed apps' models and nothing else, with no Flask app in sight.
   migrate:
-    build:
-      context: .
-      dockerfile: Containerfile
-      args:
-        # Stamped into the image and reported by /_status, so "is this running
-        # my code?" has an exact answer. scripts/up.sh supplies it.
-        GIT_SHA: ${GIT_SHA:-unknown}
+    # Names the image `web` builds; it does not build one of its own. Both
+    # services declared `build:` against the same context and the same tag, so
+    # one `up --build` walked the Containerfile twice and tagged the same name
+    # twice -- measured at 8.3s of the 91s an `up` takes on a warm cache, and
+    # four passes during a full rebuild, since restore.sh runs its own
+    # `up -d --build` first.
+    #
+    # Safe despite `web` depending on this service rather than the other way
+    # round: compose builds every service that declares `build:` before it
+    # starts any of them, so the image exists by the time migrate is started.
+    # Verified from nothing -- image removed, `up.sh` run, migrate found the
+    # image `web`'s build had just produced.
+    #
+    # What that relies on is a build actually being asked for. `up.sh` and
+    # restore.sh both pass `--build`; a bare `podman compose up` on a host with
+    # no image would try to *pull* this tag and fail, which it would also have
+    # done for `web`.
     image: localhost/${SITE_NAME:-podpack}-web:latest
     restart: "no"
     env_file:
