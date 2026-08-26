@@ -130,7 +130,7 @@ install -m 600 "$backup/secrets.env" secrets.env
 # The keys in .env that describe the host rather than the site. Every one of
 # them has been wrong on a real restore at least once.
 per_host=(SITE_NAME WEB_HOST_PORT WEB_BIND_ADDR HOST_DATA_DIR HOST_LOG_DIR
-          VOLUME_RW VOLUME_RO PODPACK_PROXY_HOPS)
+          VOLUME_RW VOLUME_RO PODPACK_PROXY_HOPS PODPACK_ENVIRONMENT)
 
 if [[ -f .env ]]; then
     install -m 600 "$backup/env" .env.from-backup

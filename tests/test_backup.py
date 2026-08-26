@@ -630,7 +630,8 @@ def test_a_fresh_clone_takes_the_backup_s_env_and_is_told_what_is_in_it(
     out = _run_restore_env_block(tmp_path, existing_env=None)
 
     assert "PROJECT=holdenweb-com" in out, out
-    for key in ("SITE_NAME", "WEB_HOST_PORT", "HOST_DATA_DIR", "PODPACK_PROXY_HOPS"):
+    for key in ("SITE_NAME", "WEB_HOST_PORT", "HOST_DATA_DIR", "PODPACK_PROXY_HOPS",
+                "PODPACK_ENVIRONMENT"):
         assert key in out, f"{key} was installed without being named"
     assert not (tmp_path / "site" / ".env.from-backup").exists()
 
