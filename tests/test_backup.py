@@ -390,6 +390,50 @@ def test_status_reports_the_declaration_and_distinguishes_silence(site, package)
     assert apps["mute_app"]["backs_up"] is None
 
 
+def test_an_app_whose_content_is_all_in_subdirectories_is_not_reported_empty(
+    site, package
+) -> None:
+    """The exact production symptom, and the reason this field was renamed.
+
+    `/_status` filtered to `p.is_file()`, so `pages` on holdenweb.com reported
+    `"stored_files": []` beside a data directory holding a megabyte -- because
+    all of it was in subdirectories, which is the normal shape for content.
+
+    What made that worse than untidy: an author deciding whether to declare
+    `Backup(data=False)` would reach for exactly this field, and every backup
+    from then on would omit the app's directory. `_check_backup_claim` never had
+    the filter and would still have warned at boot -- so podpack disagreed with
+    itself, and the weaker answer was the one on the page people read.
+    """
+    package("shelf_app", _app("shelf_app"))
+    built = _site_with(site, "shelf_app")
+    data_dir = built.extensions["podpack"].data_root / "shelf_app"
+    (data_dir / "chapters").mkdir()
+    (data_dir / "chapters" / "one.md").write_text("content lives down here")
+
+    app = built.test_client().get("/_status").get_json()["apps"]["shelf_app"]
+
+    assert app["site_content"] == ["chapters"]
+    assert "stored_files" not in app, "the old name is still being reported"
+
+
+def test_site_content_lists_files_and_directories_together(site, package) -> None:
+    """No distinction drawn between the two, deliberately.
+
+    The question this field answers is "is there anything here?", which a
+    backup asks of the directory as a whole.
+    """
+    package("mixed_app", _app("mixed_app"))
+    built = _site_with(site, "mixed_app")
+    data_dir = built.extensions["podpack"].data_root / "mixed_app"
+    (data_dir / "intro.md").write_text("a file")
+    (data_dir / "chapters").mkdir()
+
+    app = built.test_client().get("/_status").get_json()["apps"]["mixed_app"]
+
+    assert app["site_content"] == ["chapters", "intro.md"]
+
+
 # ---------------------------------------------------------------------------
 # The contract the substrate scripts consume.
 #

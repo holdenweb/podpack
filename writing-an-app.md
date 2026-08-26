@@ -864,7 +864,7 @@ currently list them; this guide is their documentation.
                    "data_dir_writable": true,
                    "log_dir": ".../devsite/logs/links",
                    "log_dir_writable": true,
-                   "stored_files": ["intro.md"],
+                   "site_content": ["intro.md", "chapters"],
                    "tables": ["links"]}}
 ```
 
@@ -872,6 +872,12 @@ That one object answers most of what can go wrong: the import-name-to-app-name
 mapping, where the site actually mounted you, whether your directories exist and
 are writable, whether your shipped data arrived, and which tables in the site's
 single `db.metadata` are yours.
+
+`site_content` lists everything in your data directory, directories included.
+That matters when you come to declare `Backup(data=...)`: an app whose content
+sits in subdirectories is still an app with content, and this field is the
+evidence you would reach for. It was called `stored_files` and listed only
+files, which made exactly that app look empty.
 
 Your dev site will not catch everything, and it is worth knowing what it cannot.
 It has no `site_package`, so it cannot show you a template hijack or a missing

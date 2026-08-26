@@ -292,13 +292,28 @@ def status() -> ResponseReturnValue:
                     for table, needers in state.needed_by.items()
                     if name in needers and state.defined_by.get(table) != name
                 ),
-                "stored_files": sorted(
-                    p.name for p in (state.data_root / name).iterdir() if p.is_file()
+                # Everything in the app's data directory, directories
+                # included. It was `stored_files` and filtered to `p.is_file()`,
+                # which made an app whose content lives in subdirectories -- the
+                # normal shape -- report an empty list beside a data directory
+                # holding a megabyte. `pages` on holdenweb.com did exactly that.
+                #
+                # The filter mattered because of what sits below: an author
+                # reading `[]` here could reasonably declare the app stateless,
+                # and every backup from then on would omit its directory. The
+                # boot check (`registry._check_backup_claim`) never had the
+                # filter and was always right, so the two disagreed and the
+                # weaker of them was the one on the page people read.
+                #
+                # Renamed with the fix rather than after it. "files" was the
+                # word that made the filter look correct.
+                "site_content": sorted(
+                    p.name for p in (state.data_root / name).iterdir()
                 ),
                 # What a backup of this site would do with the app, and
                 # whether anybody said so. `null` is not "nothing to keep":
                 # it is nobody having answered, which a backup resolves by
-                # keeping everything. Reported beside `stored_files` because
+                # keeping everything. Reported beside `site_content` because
                 # the two together are the whole question -- an app claiming
                 # to store nothing while listing files is the contradiction
                 # podpack warns about at boot.
