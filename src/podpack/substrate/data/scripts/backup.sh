@@ -102,9 +102,11 @@ fi
 # Asked source-side, because the source is the only side that identifies a
 # deployment. This used to look for a mount whose *destination* was
 # /var/lib/${project%%-*}/apps and read its source -- rebuilding a container
-# path out of the site name, while compose.yaml hardcodes
-# /var/lib/holdenweb/apps for every site (backlog 18). So it matched only where
-# the site name's first dash-separated segment was literally `holdenweb`, and
+# path out of the site name, while compose.yaml hardcoded
+# /var/lib/holdenweb/apps for every site (backlog 18, since fixed: the
+# container's paths are now /var/lib/podpack/apps and say so). It matched only
+# where the site name's first dash-separated segment was literally `holdenweb`,
+# and
 # was inert on `mysite`, on `podpack-demo`, and on `holdenweb.com` -- which was
 # the one deployment where two checkouts were ever live at once. It rebuilt the
 # container name from the site name too, and compose normalises that (dots

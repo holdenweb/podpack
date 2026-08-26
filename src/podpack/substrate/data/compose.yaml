@@ -84,13 +84,13 @@ services:
       - secrets.env
     environment:
       # SQLALCHEMY_DATABASE_URI comes from secrets.env.
-      PODPACK_CONFIG: /etc/holdenweb/app.toml
+      PODPACK_CONFIG: /etc/podpack/app.toml
       # Each enabled overlay stamps its own PODPACK_SERVICE_<NAME> in here, so
       # podpack can check what compose actually merged against what the site
       # said it wanted -- a marker a file cannot fake.
       PODPACK_SERVICE_MARKERS: "1"
     volumes:
-      - ./config/app.toml:/etc/holdenweb/app.toml:ro${VOLUME_RO:-}
+      - ./config/app.toml:/etc/podpack/app.toml:ro${VOLUME_RO:-}
     command: ["alembic", "upgrade", "head"]
     # No depends_on here: a service's overlay adds its own edge, which is what
     # lets a site run without that service at all.
@@ -112,21 +112,21 @@ services:
       # SQLALCHEMY_DATABASE_URI comes from secrets.env -- the same variable
       # name the real application uses, so the app code never has to know it is
       # in a lab.
-      PODPACK_CONFIG: /etc/holdenweb/app.toml
+      PODPACK_CONFIG: /etc/podpack/app.toml
       # Roots, not per-app directories. podpack creates a subdirectory of each
       # for every installed app, so nothing here changes when the app list
       # does -- installing a feature stays an edit to app.toml and a restart.
-      PODPACK_DATA_ROOT: /var/lib/holdenweb/apps
-      PODPACK_LOG_ROOT: /var/log/holdenweb/apps
+      PODPACK_DATA_ROOT: /var/lib/podpack/apps
+      PODPACK_LOG_ROOT: /var/log/podpack/apps
       PODPACK_SERVICE_MARKERS: "1"
     volumes:
       # ${VOLUME_RW}/${VOLUME_RO} carry the SELinux relabel flags on hosts
       # that need them -- set once in .env, empty everywhere else. They are
       # variables because the alternative was editing this file by hand,
       # which puts a substrate-managed file permanently in conflict.
-      - ${HOST_DATA_DIR}/apps:/var/lib/holdenweb/apps${VOLUME_RW:-}
-      - ${HOST_LOG_DIR}/apps:/var/log/holdenweb/apps${VOLUME_RW:-}
-      - ./config/app.toml:/etc/holdenweb/app.toml:ro${VOLUME_RO:-}
+      - ${HOST_DATA_DIR}/apps:/var/lib/podpack/apps${VOLUME_RW:-}
+      - ${HOST_LOG_DIR}/apps:/var/log/podpack/apps${VOLUME_RW:-}
+      - ./config/app.toml:/etc/podpack/app.toml:ro${VOLUME_RO:-}
     ports:
       # The external port is the one thing a host gets to dictate: Opalstack
       # allocates it to an "Nginx Proxy Port" application and proxies the site

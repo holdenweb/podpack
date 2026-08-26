@@ -1096,3 +1096,79 @@ def test_roots_outside_the_checkout_are_fine_for_any_environment(
     for environment in ("production", "staging", "local", None):
         done = _prepare_host_dirs(tmp_path, environment, str(outside))
         assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_the_container_paths_agree_with_what_podpack_is_told_to_read() -> None:
+    """A mount destination and the variable that names it must not drift apart.
+
+    compose.yaml does two things that have to say the same word: it mounts the
+    host's data at a path inside the container, and it sets PODPACK_DATA_ROOT to
+    tell podpack where to look. Rename one and not the other and the site mounts
+    its content at one path while reading an empty directory at another -- which
+    on `/_status` looks exactly like an app that has lost its data.
+
+    Written when those paths stopped saying `holdenweb` (backlog 18), because
+    that rename touched six lines in one file and five of them being right is
+    not good enough.
+    """
+    import re
+
+    compose = (DATA_ROOT / "compose.yaml").read_text()
+
+    declared = dict(
+        re.findall(r"^\s*(PODPACK_(?:DATA|LOG)_ROOT):\s*(\S+)\s*$", compose, re.M)
+    )
+    mounted = dict(
+        re.findall(r"^\s*-\s*\$\{HOST_(DATA|LOG)_DIR\}/apps:(\S+?)(?:\$\{|$)", compose, re.M)
+    )
+
+    # Guard the searches before trusting them: two patterns finding nothing
+    # would make every assertion below vacuously true.
+    assert set(declared) == {"PODPACK_DATA_ROOT", "PODPACK_LOG_ROOT"}, declared
+    assert set(mounted) == {"DATA", "LOG"}, mounted
+
+    assert declared["PODPACK_DATA_ROOT"] == mounted["DATA"], (
+        f"the data mount lands at {mounted['DATA']} and podpack is told to read "
+        f"{declared['PODPACK_DATA_ROOT']}"
+    )
+    assert declared["PODPACK_LOG_ROOT"] == mounted["LOG"], (
+        f"the log mount lands at {mounted['LOG']} and podpack is told to read "
+        f"{declared['PODPACK_LOG_ROOT']}"
+    )
+
+
+def test_no_shipped_container_path_is_named_after_a_site() -> None:
+    """The framework's paths are the framework's, in every deployment.
+
+    They were `/var/lib/holdenweb/apps` and `/etc/holdenweb/app.toml` in every
+    site podpack built, so a brand-new site's `/_status` reported another site's
+    identity and a site with no config file was told to look in a directory
+    named after somebody else's domain.
+
+    Prose may name holdenweb.com all it likes -- most of this codebase's
+    evidence comes from that deployment. This is about paths.
+    """
+    import re
+
+    offenders = []
+    for path in sorted(DATA_ROOT.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        # Comments stripped first, and this is the third test in this project
+        # to need that: the comment above backup.sh's cross-deployment guard
+        # explains the very bug this asserts is gone, so it necessarily
+        # contains the path being searched for.
+        code = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#")
+        )
+        for match in re.findall(r"/(?:etc|var/lib|var/log|srv)/[A-Za-z0-9._-]+", code):
+            if "podpack" in match or "postgres" in match or "mongo" in match:
+                continue
+            if "holdenweb" in match:
+                offenders.append(f"{path.relative_to(DATA_ROOT)}: {match}")
+
+    assert not offenders, "container paths still named after a site: " + "; ".join(offenders)

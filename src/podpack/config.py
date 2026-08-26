@@ -23,7 +23,7 @@ from flask import current_app
 from .paths import _current_app_name
 
 DEFAULT_CONFIG_PATH = pathlib.Path(
-    os.environ.get("PODPACK_CONFIG", "/etc/holdenweb/app.toml")
+    os.environ.get("PODPACK_CONFIG", "/etc/podpack/app.toml")
 )
 
 

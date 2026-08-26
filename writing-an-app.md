@@ -832,7 +832,7 @@ def create_app() -> Flask:
 ```
 
 ```toml
-# devsite/app.toml -- the kind of file a site mounts at /etc/holdenweb/app.toml
+# devsite/app.toml -- the kind of file a site mounts at /etc/podpack/app.toml
 [site]
 name = "links dev site"
 environment = "local"

@@ -56,8 +56,13 @@ logger = logging.getLogger(__name__)
 # Created unbound and attached to an app inside create_app(), so that several
 # app instances -- one per test, say -- can coexist safely.
 
-DEFAULT_DATA_ROOT = "/var/lib/holdenweb/apps"
-DEFAULT_LOG_ROOT = "/var/log/holdenweb/apps"
+# podpack's own name, not the first site it happened to be written for.
+# These were /var/lib/holdenweb/apps and /var/log/holdenweb/apps, which
+# every site inherited -- so a new site's /_status reported another site's
+# identity, and a site with no config file was told to look in a directory
+# named after somebody else's domain.
+DEFAULT_DATA_ROOT = "/var/lib/podpack/apps"
+DEFAULT_LOG_ROOT = "/var/log/podpack/apps"
 
 
 def create_app(
@@ -89,7 +94,7 @@ def create_app(
     pointed at::
 
         def create_app():
-            return podpack.create_app(site_package="holdenweb", init=_wire)
+            return podpack.create_app(site_package="mysite", init=_wire)
 
     `admin` is a predicate answering "is this request an operator's?", and it
     guards `/_status`, which reports the site's database identity, its paths

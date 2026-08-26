@@ -879,20 +879,22 @@ dbport` takes it away again. See
 | What | Host location | Container location |
 | --- | --- | --- |
 | Database cluster | `$HOST_DATA_DIR/postgres/pgdata` | `/var/lib/postgresql/data/pgdata` |
-| Per-app data | `$HOST_DATA_DIR/apps/<name>` | `/var/lib/holdenweb/apps/<name>` |
-| Per-app logs | `$HOST_LOG_DIR/apps/<name>` | `/var/log/holdenweb/apps/<name>` |
+| Per-app data | `$HOST_DATA_DIR/apps/<name>` | `/var/lib/podpack/apps/<name>` |
+| Per-app logs | `$HOST_LOG_DIR/apps/<name>` | `/var/log/podpack/apps/<name>` |
 | PostgreSQL log | `$HOST_LOG_DIR/postgres/postgresql.log` | `/var/log/postgresql` |
 | Server settings | `config/postgresql.conf` | `/etc/postgresql/postgresql.conf` (ro) |
 | Client authentication | `config/pg_hba.conf` | `/etc/postgresql/pg_hba.conf` (ro) |
 | Username mapping | `config/pg_ident.conf` | `/etc/postgresql/pg_ident.conf` (ro) |
-| Site settings | `config/app.toml` | `/etc/holdenweb/app.toml` (ro) |
+| Site settings | `config/app.toml` | `/etc/podpack/app.toml` (ro) |
 | Per-host wiring | `.env` | environment variables |
 | Credentials | `secrets.env` | environment variables |
 
 `HOST_DATA_DIR` and `HOST_LOG_DIR` default to `./hostdata` and `./hostlogs`
 (both gitignored) so the suite is self-contained. On a real host they become
-absolute — `/srv/holdenweb/data`, `/var/log/holdenweb` — and nothing else needs
-to change.
+absolute — `/srv/mysite/data`, `/var/log/mysite` — and nothing else needs to
+change. (The container side of the table above says `podpack`, not the site's
+name, and stays that way: those paths belong to the framework and are the same
+in every deployment. The host side is yours.)
 
 Apps live under an `apps/` level rather than beside `postgres/` so that the two
 ownership fixes cannot reach each other: a single recursive chown of the data
