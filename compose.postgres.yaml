@@ -70,7 +70,7 @@ services:
     depends_on:
       init-postgres:
         condition: service_completed_successfully
-    # No `ports:` here on purpose -- see the `dbport` service below.
+    # No `ports:` here on purpose -- see the `postgres-port` service below.
     healthcheck:
       # -U/-d matter: without them pg_isready reports the *server* is up before
       # the bootstrap has finished creating the application's database.
