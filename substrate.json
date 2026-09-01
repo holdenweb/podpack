@@ -5,6 +5,7 @@
       "GUNICORN_WORKERS",
       "HOST_DATA_DIR",
       "HOST_LOG_DIR",
+      "PODPACK_ENVIRONMENT",
       "POSTGRES_BIND_ADDR",
       "POSTGRES_HOST_PORT",
       "SITE_NAME",
@@ -18,6 +19,7 @@
       "GUNICORN_WORKERS",
       "HOST_DATA_DIR",
       "HOST_LOG_DIR",
+      "PODPACK_ENVIRONMENT",
       "POSTGRES_BIND_ADDR",
       "POSTGRES_HOST_PORT",
       "SITE_NAME",
@@ -49,7 +51,7 @@
   "files": {
     ".dockerignore": {
       "class": "verbatim",
-      "sha256": "a65fa6acfdcc26db5de97b7ba3fde2048a7b11cc291b72966e499d14b95c5e57"
+      "sha256": "a8c9301d81ee82ca20a2e97154b92a3e1680450404ce07b1ef3e6865871c2f2f"
     },
     ".env.example": {
       "class": "config",
@@ -76,7 +78,7 @@
     },
     "alembic/env.py": {
       "class": "verbatim",
-      "sha256": "13259bab0a314b0f94587bfb2d09cc68866edab8940bb6645837ccce80f32550"
+      "sha256": "e34af372f8937c99dfbb921f7d958142fe200e9f5cae5ff5829e019ab325dc82"
     },
     "alembic/script.py.mako": {
       "class": "verbatim",
@@ -93,11 +95,11 @@
     },
     "compose.postgres.yaml": {
       "class": "verbatim",
-      "sha256": "7eca502f18bd375e7d4c29f385fee52765ce6e9de45e01dedf3e5e93bfe9c057"
+      "sha256": "768832bd0880cc17c62c103729ebee846b3000286e15fb362c994f0c14209cdc"
     },
     "compose.yaml": {
       "class": "verbatim",
-      "sha256": "395b2c013bbc3752a3606d29f370dc60dc4972772c7458f1d3fc9e3aeefff3ee"
+      "sha256": "712c4295ca33f58fef777c570fda9b80f8ba24b9b304b46d82d4c194c4bb1350"
     },
     "config/mongod.conf": {
       "class": "verbatim",
@@ -134,7 +136,7 @@
     },
     "scripts/backup.sh": {
       "class": "verbatim",
-      "sha256": "26b936783827f84bf03bdfd8b0b548c3578b4131be8d40ebefcf6280bba44876"
+      "sha256": "58721b291d822321ba29dbf0eef6b54405250f4ee439bb427f45019edc9cb626"
     },
     "scripts/configure-host.py": {
       "class": "verbatim",
@@ -146,11 +148,11 @@
     },
     "scripts/prepare-host-dirs.sh": {
       "class": "verbatim",
-      "sha256": "d39f88f28560a9538e7ca159a4995c2a39480c50f7eb676c71655bd417b33b86"
+      "sha256": "e3e0a3eca714caf363f4374f7eea4eadb8ad077f4cc61db2cdb4c1c11432acc8"
     },
     "scripts/restore.sh": {
       "class": "verbatim",
-      "sha256": "bed1aec257eeb48a4e99fbbe572fdc895d0ce466329c61c0b9b9e5821eedba26"
+      "sha256": "842fe39c4c95f24e26595d566784dac99dd18278ebcb650697dd7510ea0b5785"
     },
     "scripts/up.sh": {
       "class": "verbatim",
@@ -158,7 +160,7 @@
     },
     "scripts/verify-backup.sh": {
       "class": "verbatim",
-      "sha256": "e3b037ab463596c65b28fc1a63a2e819a5dd424c877fc90d1f0f66ef1bbf1023"
+      "sha256": "ee79037bddb1459c8801576d44b116719b717a08ab8e44ddcceb42360ed36c6e"
     },
     "secrets.env.example": {
       "class": "config",
@@ -174,6 +176,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.8.0",
+  "podpack_version": "0.9.0b6",
   "substrate_schema": 1
 }
