@@ -28,6 +28,14 @@ dev.env
 devdata/
 devlogs/
 
+# The same argument, stronger: .env carries per-host wiring and secrets.env
+# holds the production credentials verbatim. The Containerfile copies named
+# paths, so neither reaches the image today -- but both are streamed to the
+# build daemon on every build, and one future `COPY . .` would bake every
+# secret into a layer. No reason to hand them over to find out.
+.env
+secrets.env
+
 # The site's own experiments and one-off utilities. Nothing reaches the image
 # either way -- the Containerfile copies named paths rather than `.` -- but a
 # scratch directory is where a database dump or a big sample file lands, and

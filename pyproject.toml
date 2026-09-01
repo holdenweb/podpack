@@ -1,6 +1,6 @@
 [project]
 name = "podpack"
-version = "0.9.0b5"
+version = "0.9.0b6"
 description = "A framework for building and running web sites out of pluggable apps"
 readme = "README.md"
 license = "MIT"
@@ -78,3 +78,12 @@ ignore_missing_imports = true
 # The canonical substrate is shipped data, not importable code -- its env.py
 # and healthcheck.py are copied into sites, never imported from here.
 exclude = 'src/podpack/substrate/data/'
+
+[tool.pytest.ini_options]
+# Where the tests are, so a bare `pytest` does not walk the whole tree. Without
+# it, collection descends into a lab's hostdata/postgres/pgdata, which
+# init-postgres chowns to the container's postgres uid -- a subuid the invoking
+# user cannot read under rootless podman -- and aborts with PermissionError
+# before a test runs. It cannot happen on macOS, so it appears first on Linux.
+# history.md records this as a required setting; this applies it.
+testpaths = ["tests"]

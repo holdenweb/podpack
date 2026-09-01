@@ -455,7 +455,7 @@ suite does not publish by default (see
 Ask for it, for as long as it takes:
 
 ```bash
-podman compose --profile dbport up -d dbport
+podman compose --profile postgres-port up -d postgres-port
 ```
 
 ```bash
@@ -465,10 +465,10 @@ uv run alembic revision --autogenerate -m "what changed"
 ```
 
 ```bash
-podman compose --profile dbport rm -sf dbport
+podman compose --profile postgres-port rm -sf postgres-port
 ```
 
-`POSTGRES_HOST_PORT=5439 podman compose --profile dbport up -d dbport` picks a
+`POSTGRES_HOST_PORT=5439 podman compose --profile postgres-port up -d postgres-port` picks a
 different number for one use, since a shell variable beats the one in `.env`.
 
 **Applying** one happens in the container, automatically at startup, or by hand:
@@ -862,16 +862,16 @@ other deployment on the machine had to avoid. Two sites are otherwise
 isolated by `SITE_NAME` alone. Ask when you want it:
 
 ```bash
-podman compose --profile dbport up -d dbport
+podman compose --profile postgres-port up -d postgres-port
 ```
 
 ```bash
-POSTGRES_HOST_PORT=5439 podman compose --profile dbport up -d dbport
+POSTGRES_HOST_PORT=5439 podman compose --profile postgres-port up -d postgres-port
 ```
 
 A shell variable beats `.env`, so the second form chooses a number for one
-use without editing a committed file. `podman compose --profile dbport rm -sf
-dbport` takes it away again. See
+use without editing a committed file. `podman compose --profile postgres-port rm -sf
+postgres-port` takes it away again. See
 [ADR-0027](https://github.com/holdenweb/podpack/blob/main/adrs/0027-the-database-port-is-published-only-on-request.md).
 
 ## Where everything lives
@@ -1069,7 +1069,7 @@ podman compose exec postgres psql -U labadmin -d holdenweb
 ```
 
 To use the host's own `psql` — or any other client — publish the port first
-(`podman compose --profile dbport up -d dbport`, see [Ports](#ports)):
+(`podman compose --profile postgres-port up -d postgres-port`, see [Ports](#ports)):
 
 ```bash
 PGPASSWORD=holdenweb-app-password psql -h 127.0.0.1 -p 5433 -U holdenweb_app -d holdenweb
