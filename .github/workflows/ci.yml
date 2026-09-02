@@ -1,0 +1,79 @@
+# Run the checks on every push and pull request.
+#
+# publish.yml runs the tests too, but only when a release tag is pushed -- which
+# is the worst moment to learn a test fails, on the one index that never forgets
+# a version. This runs them while a fix is still cheap. It also runs the two
+# checks a release never did: mypy (configured, never gated) and whether the
+# substrate record is current.
+#
+# The one that matters most here cannot run in publish.yml at all:
+# test_migrate_persists needs a real PostgreSQL, and the service below is the
+# only place the suite ever gets one. Without it that test skips, and the silent
+# migration-rollback it guards goes unseen exactly as it did the night it shipped.
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# A newer push to the same branch makes an in-flight run pointless; drop it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    # A throwaway PostgreSQL, created and destroyed with the job and reachable
+    # only from inside it. The password is a test value in a public file on
+    # purpose -- it protects nothing, and prefixing it `test-` says so (CLAUDE.md
+    # §8). pg_isready carries -U/-d because the bare probe reports ready while
+    # the bootstrap is still creating the database (gotcha 6), and a step that
+    # then connects too early fails as if the test were wrong.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: test-user
+          POSTGRES_PASSWORD: test-pw
+          POSTGRES_DB: test-db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test-user -d test-db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Types
+        # Configured (files = src, tests) and, until now, run only by hand.
+        run: uv run mypy
+
+      - name: Tests
+        # The URI turns on test_migrate_persists against the service above; the
+        # rest of the suite is engine-neutral and does not read it. `uv run`
+        # syncs the dev group first, exactly as publish.yml relies on.
+        env:
+          PODPACK_TEST_DATABASE_URI: postgresql+psycopg2://test-user:test-pw@localhost:5432/test-db
+        run: uv run pytest -q
+
+      - name: The substrate record is current
+        # substrate.json must name the version whose files it holds, or a
+        # rebuild ships stale substrate silently -- the recurring footgun this
+        # is meant to end. It is `continue-on-error` only because it is red
+        # today for a true reason: there are substrate changes not yet in a
+        # release, so the record trails the version. The release that ships them
+        # refreshes it (README: "A release that changes the substrate needs one
+        # more step first"); delete this one line then, so it can start failing
+        # the build for real.
+        continue-on-error: true
+        run: uv run podpack substrate status --check

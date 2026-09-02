@@ -72,7 +72,7 @@ def _url_in(schema: str) -> str:
     exists, exactly the healthy state `refuse_a_missing_schema` expects in
     production, so the code path under test is the production one.
     """
-    sep = "&" if "?" in PG else "?"
+    sep = "&" if PG and "?" in PG else "?"  # PG is set whenever this runs
     return f"{PG}{sep}options=-csearch_path%3D{schema}"
 
 
