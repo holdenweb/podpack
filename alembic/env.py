@@ -128,6 +128,15 @@ def run_migrations_online() -> None:
         # Before anything else touches the database: the failure this catches is
         # terminal for the site, because `web` is gated on `migrate` completing.
         refuse_a_missing_schema(connection)
+        # That check's SELECT auto-begins a transaction under SQLAlchemy 2.0.
+        # Release it before alembic opens the migration transaction: otherwise
+        # alembic, finding a transaction it did not start, declines to commit
+        # -- and NullPool closing the connection then rolls every CREATE TABLE
+        # back, silently, behind a clean `upgrade` log. SQLite never reaches
+        # this (the schema check returns early for non-PostgreSQL, so no SELECT
+        # and no auto-begin), which is why the SQLite test suite could not see
+        # it, and why only a fresh migrate onto real PostgreSQL ever did.
+        connection.rollback()
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
