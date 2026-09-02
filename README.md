@@ -789,6 +789,33 @@ The single-version guard is the one worth knowing about: `uv publish` uploads
 `podpack-0.4.0` in `dist/` while `pyproject.toml` said 0.7.3. Publishing then
 would have shipped 0.4.0, and PyPI does not let you take a version back.
 
+### A release that changes the substrate needs one more step first
+
+podpack is its own first substrate consumer: the repository root is a rendered
+instance of the packaged tree, and `substrate.json` records the version that
+rendered it. So a release that changes any substrate file — anything under
+`src/podpack/substrate/data/`, be it a `Containerfile`, a `*.conf`, a script, or
+`alembic/env.py` — has to carry that record forward in the same release, or
+`substrate status --check` (the CI hook) goes red and the recorded version
+silently trails the package. That version is
+`importlib.metadata.version("podpack")`, written by `substrate upgrade` alone —
+bumping `pyproject.toml` does not move it, so a build step must:
+
+```bash
+# after bumping the version in pyproject.toml:
+uv sync                                    # the installed metadata becomes the new version
+uv run podpack substrate upgrade --dir .   # records it, and re-baselines the changed files
+git add pyproject.toml substrate.json      # and the substrate files you changed
+git commit
+git tag r<version>                         # publish.py requires this tag to exist
+```
+
+Because `publish.py` refuses to upload unless the tree is clean and `r<version>`
+exists, the refresh necessarily happens first — which is the point. A release
+that touches no substrate file needs no `substrate upgrade`; running `substrate
+status --check` before tagging is cheap insurance that the record and the
+package still agree either way.
+
 ## Getting it, and keeping it current
 
 The substrate ships inside the podpack package, and a site installs it with
