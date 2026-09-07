@@ -36,6 +36,8 @@ here as against in `README.md` or `claude.md`.
 | [ADR-0024](0024-the-front-page-belongs-to-the-site.md) | **The front page belongs to the site.** podpack's `/` is a fallback, registered only if no app claims it — it used to be a fixture, and won silently against any site that wanted its own front page. |
 | [ADR-0025](0025-the-site-wires-its-own-extensions.md) | **The site wires its own extensions.** `create_app(init=…)` for mail and session policy — which are not apps, because they register no blueprint. Its login clause is superseded by ADR-0033. |
 | [ADR-0033](0033-login-is-core.md) | **Login is core.** podpack ships the models, the datastore and `is_admin`, because it already named the role, guarded `/_status` with it and documented three commands for it — leaving each site the same twenty-four lines. ADR-0029's argument one layer up: what the framework's own endpoints require is not optional. |
+| [ADR-0030](0030-apps-report-health-and-status-by-overriding.md) | **Apps report health and status by overriding, and cannot fail a site by accident.** `SiteApp.healthz()`/`status()` default to `None` — *not reported*, distinct from *healthy*. A failing app keeps `/healthz` at 200 and names itself unless it declares `fatal=True`; exceptions are caught, not propagated. In-process, not a self-HTTP hop. |
+| [ADR-0038](0038-a-distribution-can-ship-more-than-one-app.md) | **A distribution can ship more than one app.** The distribution is the unit of packaging and dependency; an app is still one `site_app` at one import name (ADR-0002/0003), enabled and mounted independently (ADR-0004/0006). `podpack-pages` ships `pages`, `pybooks` and `blog` from one codebase — so a distribution's name no longer predicts the apps inside it. |
 
 ## App state and data
 

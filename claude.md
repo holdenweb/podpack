@@ -33,7 +33,7 @@ by hostname. Do not add `SERVER_NAME` handling or a site registry.
 
 | Directory | What it is | State |
 | --- | --- | --- |
-| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 23 commits, working |
+| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 128 commits, working |
 | `~/sites/podpack-notes` | the notes app, in its own repository | pushed; installed by the demo site |
 | `~/sites/podpack-demo` | a site, and the worked output of following `creating-a-site.md` | installs podpack + podpack-notes from git |
 | `~/sites/pp-pdf` | the PDF tools as a standalone installable package | 20 commits; **reconciled** — installs as a podpack app and still works as a plain blueprint (§5) |
@@ -136,7 +136,7 @@ answer if this ever gets painful enough to justify multiple heads.
 
 ### Tests
 
-`uv run pytest` — 31 tests covering what the registry promises: the app list
+`uv run pytest` — 198 tests covering what the registry promises: the app list
 being configuration rather than code, models reaching `db.metadata`, template
 namespacing and site override, seeding once and re-arming, and the migration
 environment needing no Flask app.
@@ -301,17 +301,17 @@ database only from `SQLALCHEMY_DATABASE_URI`.
 
 ### Still open here
 
-- The MongoDB lab now lives at `holdenweb.com/scratch/podman/`, untracked
-  (2026-08-13). Still runnable, no longer in anyone's way. The question it
-  leaves is a design one rather than housekeeping: **should podpack offer
-  MongoDB as an optional backing service?** It is not an app — an app is a
-  blueprint with endpoints, and a database belongs to the substrate, where
-  PostgreSQL is. The shape that would work is a compose service under a
-  profile with a site setting `COMPOSE_PROFILES=mongo` in `.env`, so that
-  `depends_on` still resolves, and the client wired into `app.extensions` by
-  the site's own `init` exactly as mail and login are (ADR-0025). The cost is
-  a second persistence story none of podpack's promises currently cover: one
-  `db.metadata`, one alembic history, `/_status` reporting one database.
+- **MongoDB as an optional backing service — decided and shipped** (this was
+  the open question here; settled by ADR-0028/0029, 2026-08-13). podpack offers
+  it as a compose *overlay* the site chooses through `COMPOSE_FILE` /
+  `podpack substrate init --services`, with the client wired into
+  `app.extensions` by the site's own `init` exactly as mail is (ADR-0025):
+  `src/podpack/services/` catalogues it and `compose.mongodb.yaml` ships the
+  overlay. PostgreSQL is required, MongoDB optional (ADR-0029). The
+  `COMPOSE_PROFILES=mongo` shape once sketched here was measured and rejected —
+  a compose *profile* leaves `depends_on` unresolved, which is exactly what the
+  ordering gates need; ADR-0028 records that measurement. The lab that raised
+  the question lived at `holdenweb.com/scratch/podman/`.
 - **An app upgrade process, deliberately deferred.** Installing an app is
   handled; upgrading one to a version whose expectations have changed is not.
   Two known gaps, both harmless today because no app yet ships data:

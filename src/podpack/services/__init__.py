@@ -34,8 +34,9 @@ class CoreService:
 
     name: str
     """The identifier everywhere: catalogue key, compose service and hostname,
-    overlay infix, the value an app puts in `SiteApp.requires`, the key in
-    `[services.<name>]` and in `/_status`."""
+    overlay infix (`compose.<name>.yaml`), the name a site selects it by
+    (`COMPOSE_FILE` / `substrate --services`, ADR-0028), and its label in
+    `/_status`."""
 
     image: str
     internal_port: int

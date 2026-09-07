@@ -806,9 +806,12 @@ DEV = HERE / "devsite"
 
 # PODPACK_CONFIG is the one variable read at *import* time -- podpack freezes it
 # into a module constant -- so it would have to be set before the import below.
-# This file passes `config_path=` instead and sets the other three, which are
-# read when create_app runs. The import order is convention, not a requirement.
+# This file passes `config_path=` instead and sets the rest (including the
+# framework secret SECURITY_PASSWORD_SALT, required since login became core --
+# ADR-0033), which are read when create_app runs. The import order is
+# convention, not a requirement.
 os.environ.setdefault("SECRET_KEY", "dev-only")
+os.environ.setdefault("SECURITY_PASSWORD_SALT", "dev-only")
 os.environ.setdefault("SQLALCHEMY_DATABASE_URI", f"sqlite:///{DEV / 'dev.db'}")
 os.environ.setdefault("PODPACK_DATA_ROOT", str(DEV / "data"))
 os.environ.setdefault("PODPACK_LOG_ROOT", str(DEV / "logs"))
@@ -855,7 +858,9 @@ development and test entry points — in production every one is left unset and
 the values come from the config file and the environment. README does not
 currently list them; this guide is their documentation.
 
-`/_status` is then the fastest check that your app is wired up properly:
+`/_status` is the fastest check that your app is wired up properly — once you
+can reach it (it answers only an authenticated `admin`-role operator, and 404s
+to everyone else):
 
 ```json
 "apps": {"links": {"installed_from": "podpack_links",
@@ -865,7 +870,8 @@ currently list them; this guide is their documentation.
                    "log_dir": ".../devsite/logs/links",
                    "log_dir_writable": true,
                    "site_content": ["intro.md", "chapters"],
-                   "tables": ["links"]}}
+                   "defines_tables": ["links"],
+                   "needs_tables": []}}
 ```
 
 That one object answers most of what can go wrong: the import-name-to-app-name
@@ -883,6 +889,9 @@ Your dev site will not catch everything, and it is worth knowing what it cannot.
 It has no `site_package`, so it cannot show you a template hijack or a missing
 chrome block, and it uses SQLite rather than PostgreSQL. Build a second one with
 a site package and a deliberately minimal `base.html` if either matters to you.
+And because `/_status` is operator-only, reaching the JSON above means creating
+an admin and signing in first — `creating-a-site.md` step 9 has the
+`flask users create` / `roles create admin` / `roles add` sequence.
 
 ---
 

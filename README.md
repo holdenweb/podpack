@@ -908,7 +908,7 @@ postgres-port` takes it away again. See
 | Database cluster | `$HOST_DATA_DIR/postgres/pgdata` | `/var/lib/postgresql/data/pgdata` |
 | Per-app data | `$HOST_DATA_DIR/apps/<name>` | `/var/lib/podpack/apps/<name>` |
 | Per-app logs | `$HOST_LOG_DIR/apps/<name>` | `/var/log/podpack/apps/<name>` |
-| PostgreSQL log | `$HOST_LOG_DIR/postgres/postgresql.log` | `/var/log/postgresql` |
+| PostgreSQL log | `$HOST_LOG_DIR/postgres/postgresql-*.log` | `/var/log/postgresql` |
 | Server settings | `config/postgresql.conf` | `/etc/postgresql/postgresql.conf` (ro) |
 | Client authentication | `config/pg_hba.conf` | `/etc/postgresql/pg_hba.conf` (ro) |
 | Username mapping | `config/pg_ident.conf` | `/etc/postgresql/pg_ident.conf` (ro) |
@@ -1072,12 +1072,14 @@ default to sitting beside the config file, and all three are mounted together.
 
 ## Reading the logs
 
-PostgreSQL is configured with `logging_collector = on`, writing to a **file on
-the host**, matching how it would be run in production — so `podman logs` shows
-little for it beyond startup:
+PostgreSQL is configured with `logging_collector = on`, writing to **files on
+the host** — day-of-week files (`postgresql-Mon.log` … `postgresql-Sun.log`,
+rotated weekly with truncate-on-rotation, so a shared host's disk cannot fill)
+rather than one growing file — matching how it would be run in production, so
+`podman logs` shows little for it beyond startup:
 
 ```bash
-tail -f hostlogs/postgres/postgresql.log
+tail -f hostlogs/postgres/postgresql-*.log     # or the current day's file
 ```
 
 The site logs to stdout, and each app additionally to its own file:

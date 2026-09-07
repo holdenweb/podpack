@@ -26,7 +26,7 @@ the record of who changed what is a shell session that ended months ago.
 ## Decision
 
 Non-secret per-host settings live in `config/app.toml`, bind-mounted read-only
-at `/etc/holdenweb/app.toml` and read by `load_host_config` in
+at `/etc/podpack/app.toml` and read by `load_host_config` in
 `src/podpack/config.py`. Secrets arrive through the environment: `require_env`
 fetches `SECRET_KEY` and `SQLALCHEMY_DATABASE_URI`, and those two are the whole
 of it (`src/podpack/__init__.py:101-102`). Neither loader falls back. A missing

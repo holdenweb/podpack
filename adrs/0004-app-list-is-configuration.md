@@ -21,7 +21,7 @@ been the one thing that could not be varied without one.
 ## Decision
 
 A site names its apps as import names in `[site] apps` in the host-mounted TOML
-(`config/app.toml`, bind-mounted read-only at `/etc/holdenweb/app.toml`).
+(`config/app.toml`, bind-mounted read-only at `/etc/podpack/app.toml`).
 `installed_apps()` in `src/podpack/config.py` reads it, `create_app` passes it
 to `install_apps`, and the registry does `import_module` on each name in the
 order given. Adding or removing a feature is an edit to that file and a
