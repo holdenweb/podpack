@@ -16,11 +16,13 @@ distribution: `podpack-notes` ships `podpack_notes`, `podpack-qrcode` ships
 a site turned out to want three of them at once, mounted separately and each
 with its own navigation: the plain `pages` content at `/pages` with no nav entry,
 a Python course at `/pybooks` under a "Python" entry, and a blog at `/blog` under
-a "Blog" entry. All three are the *same* rendering code — `pybooks` and `blog`
-are the pages app constructed with a different title, data tree and nav — so
-splitting them into three distributions would have triplicated packaging, three
-`pyproject.toml`s and three release cycles, for one body of code that changes
-together.
+a "Blog" entry. The three share one body of content-serving code — the site
+chrome, the templates, the asset-rewriting and tree-reading machinery. `pybooks`
+reuses the pages engine outright (it is `PagesApp` under another name); `blog` is
+a distinct kind built on the same toolbox, with its own views, manifest reader
+and publish contract. Splitting them into three distributions would have
+triplicated packaging — three `pyproject.toml`s and three release cycles — for
+one codebase that changes together.
 
 The question was whether podpack's model even permits one distribution to offer
 several apps, or whether the one-app-per-distribution reading was load-bearing.
@@ -45,10 +47,11 @@ by listing that app's import name in `apps` (ADR-0004) and mounts each where it
 likes (ADR-0006); the apps from one distribution are enabled, ordered and mounted
 independently of one another, exactly as apps from separate distributions are.
 
-Apps in one distribution may share code freely — `podpack_pages.pybooks` and
-`podpack_pages.blog` are the pages app's own `PagesApp` and blueprint factory
-constructed with different configuration — because the registry keys everything
-off the blueprint name, not the distribution.
+Apps in one distribution may share code freely — `podpack_pages.pybooks` is the
+pages app's own `PagesApp` under a second name, while `podpack_pages.blog` is a
+separate `SiteApp` kind that shares only the chrome and the tree-reading toolbox
+— because the registry keys everything off the blueprint name, not the
+distribution.
 
 ## Consequences
 
@@ -74,8 +77,8 @@ that diverge would be better as three distributions.
 
 - **One app per distribution, enforced by the convention.** Would have forced
   `pages`, `pybooks` and `blog` into three repositories and three distributions
-  for what is one rendering engine with three configurations — triplicated
-  packaging and version churn, and three places for the shared code to drift.
+  for what is one shared content-serving codebase — triplicated packaging and
+  version churn, and three places for the shared code to drift.
   Rejected: the convention was always documented as convention only, and the
   registry never depended on it.
 - **One `pages` app that switches behaviour by configuration and mount.** A
