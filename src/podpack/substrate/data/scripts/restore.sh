@@ -26,6 +26,11 @@
 # Usage:  scripts/restore.sh <backup-directory> [--yes]
 set -euo pipefail
 
+# CDPATH is exported in some shells; with it set, bash echoes the matched
+# directory on a `cd`, so the `$(cd ... && pwd)` below would capture the path
+# twice and the `cd "$here"` after it would fail on the doubled value. Clear it.
+unset CDPATH
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$here"
 
