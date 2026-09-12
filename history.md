@@ -190,8 +190,11 @@ suite that drives a real browser against the running site.
 
 **Outstanding:**
 
-1. **Publish the four apps.** Each needs a *pending publisher* registered on
-   PyPI first — the account holder's action, not something a session can do.
+1. **Publish the five apps** — `podpack-pages`, `podpack-qrcode`, `pp-pdf`,
+   `podpack-notes`, `podpack-notebooks`. Each needs a *pending publisher*
+   registered on PyPI first — the account holder's action, not something a
+   session can do. This said *four* until `podpack-notebooks` joined the estate
+   (September 2026); `podpack` itself is still the only one published, at 0.9.1.
 2. **Retire the git sources** once they are published: delete every
    `[tool.uv.sources]` block and depend on versions. This is the payoff for
    publishing, and the last item of the publication plan.
