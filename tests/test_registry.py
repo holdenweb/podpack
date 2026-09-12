@@ -533,7 +533,7 @@ def test_a_bare_blueprint_is_named_as_such(
 ) -> None:
     """The wrong type and the missing name are different mistakes.
 
-    `pp-pdf` shows why this one is worth distinguishing: a package can be usable
+    `podpack-pdf` shows why this one is worth distinguishing: a package can be usable
     both as a plain blueprint and as a podpack app, so exporting the blueprint
     under this name is a natural half-step rather than an exotic error. While
     both cases shared a message, it told an author whose module said `site_app =

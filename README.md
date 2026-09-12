@@ -199,12 +199,12 @@ framework is built around.
 there, which is a dependency change and a rebuild:
 
 ```bash
-uv add "pp-pdf @ git+https://github.com/…/pp-pdf"   # records it in uv.lock
+uv add "podpack-pdf @ git+https://github.com/…/podpack-pdf"   # records it in uv.lock
 podman compose up -d --build                        # bakes it into the image
 ```
 
 ...and *then* the line in `app.toml`. podpack itself is indifferent to how the
-distribution arrived — `apps = ["pp_pdf"]` is an import name, and the registry
+distribution arrived — `apps = ["podpack_pdf"]` is an import name, and the registry
 only does `import_module`. An index, a git repository, a direct URL and a local
 path are all the same to it.
 
@@ -298,7 +298,7 @@ worth recording so the idea does not get reinvented:
 
 If the app list ever does become a chore, the answer is **entry points**, not a
 name prefix: they impose no naming, work for a distribution called anything, and
-`pp-pdf` already ships one. That is the hybrid worth building — entry points for
+`podpack-pdf` already ships one. That is the hybrid worth building — entry points for
 discovery, the config list for ordering and enablement.
 
 ### Where an app lands is the site's decision

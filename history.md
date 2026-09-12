@@ -28,7 +28,7 @@ holdenweb.com; holdenweb.com is the proof that the goal was met.
 | [`podpack`](https://github.com/holdenweb/podpack) | 0.8.0 | **PyPI** | the framework and the substrate |
 | [`podpack-qrcode`](https://github.com/holdenweb/podpack-qrcode) | 0.2.1 | tagged, not yet | app: QR code generator |
 | [`podpack-pages`](https://github.com/holdenweb/podpack-pages) | 0.2.0 | untagged | app: HTML/Markdown content |
-| [`pp-pdf`](https://github.com/holdenweb/pp-pdf) | 0.2.0 | tagged, not yet | app: PDF booklet maker and splitter |
+| [`podpack-pdf`](https://github.com/holdenweb/podpack-pdf) | 0.2.0 | tagged, not yet | app: PDF booklet maker and splitter |
 | [`podpack-notes`](https://github.com/holdenweb/podpack-notes) | 0.1.2 | tagged, not yet | app: notes, the guide's worked example |
 | `~/sites/holdenweb.com` | 1.6.0 | n/a | the real site; four apps installed |
 | `~/sites/podpack-demo` | 0.2.0 | n/a | a site built *by following the guide* |
@@ -37,7 +37,7 @@ holdenweb.com; holdenweb.com is the proof that the goal was met.
 [`creating-a-site.md`](creating-a-site.md) is executable rather than
 aspirational. If the guide stops working, the demo stops building.
 
-**A wrinkle worth knowing before touching tags.** `pp-pdf` was split out of
+**A wrinkle worth knowing before touching tags.** `podpack-pdf` was split out of
 holdenweb.com and inherited its entire tag history — 29 tags from `r0.10.0` to
 `r1.6.0` — while its own version is 0.2.0. Publishing triggers on `r*` tags, so
 a `git push --tags` there would fire the workflow 29 times. Each run would fail
@@ -190,7 +190,7 @@ suite that drives a real browser against the running site.
 
 **Outstanding:**
 
-1. **Publish the five apps** — `podpack-pages`, `podpack-qrcode`, `pp-pdf`,
+1. **Publish the five apps** — `podpack-pages`, `podpack-qrcode`, `podpack-pdf`,
    `podpack-notes`, `podpack-notebooks`. Each needs a *pending publisher*
    registered on PyPI first — the account holder's action, not something a
    session can do. This said *four* until `podpack-notebooks` joined the estate

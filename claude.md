@@ -324,7 +324,7 @@ database only from `SQLALCHEMY_DATABASE_URI`.
 
   Steve's call (2026-08-07): not yet. The trigger to watch for is not "a real
   app" but specifically **an app that ships data expected to change with its
-  code** — `pp_pdf` is real and ships none. Solving it early would mean guessing
+  code** — `podpack_pdf` is real and ships none. Solving it early would mean guessing
   at what versioned seed data needs to do; solving it late means one migration.
 
   Since 2026-08-13 the machinery for the eventual answer exists: the substrate
@@ -334,7 +334,7 @@ database only from `SQLALCHEMY_DATABASE_URI`.
 
 ---
 
-## 5. `pp-pdf`: the first external plugin — reconciled
+## 5. `podpack-pdf`: the first external plugin — reconciled
 
 `~/sites/pp-pdf` (formerly `~/sites/hwpdf`) holds the PDF booklet and
 page-splitting tools. It was built against the *speculative* discovery design in
@@ -343,12 +343,12 @@ so the two did not fit together. They now do, along the lines this section
 originally recommended: a `site_app` alongside the existing `pdf_blueprint`
 export, with the entry point kept.
 
-| | `pp-pdf` as a plain blueprint | `pp-pdf` under podpack |
+| | `podpack-pdf` as a plain blueprint | `podpack-pdf` under podpack |
 | --- | --- | --- |
-| Discovery | entry point `[project.entry-points."holdenweb.apps"]` | import name `pp_pdf` listed in `apps` |
+| Discovery | entry point `[project.entry-points."holdenweb.apps"]` | import name `podpack_pdf` listed in `apps` |
 | What is discovered | a bare `Blueprint` | `site_app: SiteApp` |
-| Mount point | the host's argument to `register_blueprint` | `[site.mounts] pp_pdf`, defaulting to the app's own |
-| Base template | its own `pp_pdf/standalone.html` | the site's `base.html` |
+| Mount point | the host's argument to `register_blueprint` | `[site.mounts] pdf`, defaulting to the app's own |
+| Base template | its own `pdf/standalone.html` | the site's `base.html` |
 | Registration hook | `blueprint.record_once` | `SiteApp.init` |
 | Nav, models, data, per-app dirs | none | supported by the registry |
 
@@ -390,7 +390,7 @@ to `podpack.create_app(site_package="holdenweb", init=_wire)`; its own routes
 are the in-repo app `main` (front page, `/config`, `/ip`, `/python`, legacy
 redirects); content moved out to `podpack-pages` (one name space, Markdown
 searched before HTML, at `/pages/`), QR codes to `podpack-qrcode`, and the
-built-in PDF tools were deleted in favour of installing `pp_pdf`. Its alembic
+built-in PDF tools were deleted in favour of installing `podpack_pdf`. Its alembic
 history gained a true root revision, so a fresh database builds from empty —
 which is also what the `migrate` container needs. The two new apps live in
 /tmp at Steve's request until he creates their GitHub repositories; the site's
@@ -406,7 +406,7 @@ still blocked (a path source cannot survive a build).
   Steve chose deletion. **But `/asset/` and `rewrite_asset_urls` must stay.**
   They are not HTTP-specific, and `data/html-pages/writing/images/` holds 12
   images that three pages reference relatively; deleting the route 404s them.
-- **Is content core or a plugin?** Still open. Easier to answer once `pp-pdf` is
+- **Is content core or a plugin?** Still open. Easier to answer once `podpack-pdf` is
   installed alongside another app and there are two to compare.
 
 ### Settled: uwsgi goes, and the `deploy` utility with it
@@ -445,7 +445,7 @@ rebuild rather than a reload, and `gunicorn --reload` covers development.
 
 1. **Publishing** (Steve's own checklist): GitHub repositories for
    `podpack-pages` and `podpack-qrcode` (currently in /tmp), and pushing this
-   repository's and `pp-pdf`'s unpushed commits. Until then every consuming
+   repository's and `podpack-pdf`'s unpushed commits. Until then every consuming
    site locks local paths, and no container build can succeed.
 2. **Then holdenweb.com goes to git sources**: repoint its four
    `[tool.uv.sources]`, `uv lock`, and its compose stack comes up — the
@@ -454,7 +454,7 @@ rebuild rather than a reload, and `gunicorn --reload` covers development.
    fully operational: `uv lock --upgrade-package` is the interim mechanism,
    not the answer.
 4. Housekeeping: `base_url`. (The MongoDB lab is dealt with — see §4.)
-5. **Decide about `pp-pdf`'s two discovery routes.** It exposes both a
+5. **Decide about `podpack-pdf`'s two discovery routes.** It exposes both a
    `holdenweb.apps` entry point resolving to a bare blueprint and a `site_app`
    for podpack. Both work and are tested; the entry point is what keeps the
    package usable by a site that has never heard of this framework. Keep both,

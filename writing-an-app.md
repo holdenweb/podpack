@@ -200,7 +200,7 @@ to remove first.
 > which reads like "podpack was never installed" rather than "uv just removed
 > it".
 >
-> **This is a disagreement, not a preference.** `pp-pdf`'s pyproject states the
+> **This is a disagreement, not a preference.** `podpack-pdf`'s pyproject states the
 > rule as "every way of declaring it — an extra, *a dependency group*, a
 > `[tool.uv.sources]` path — binds at *lock* time". That is right for a path
 > source and wrong for a git one, which is the difference measured above.
@@ -429,7 +429,7 @@ gives you nothing else here:
 
 - **No CSRF of any kind.** A plain `<form method="post">` in your app is
   accepted from any origin. Bring `flask-wtf` yourself if you need it, as
-  `pp-pdf` does.
+  `podpack-pdf` does.
 - **No cookie policy.** `SESSION_COOKIE_SECURE` and friends are the site's
   business, and no site is obliged to set them.
 - **The site caps request size** with `[limits] max_upload_bytes`, which becomes
@@ -496,7 +496,7 @@ the site. On a site that has a package of its own but ships no chrome — which 
 every early-stage site — the app's file wins and replaces the site's entire
 layout, front page included, and with two such apps installed whichever was
 listed first wins. If you want a standalone layout, namespace it
-(`templates/links/standalone.html`) and name it explicitly, as `pp-pdf` does.
+(`templates/links/standalone.html`) and name it explicitly, as `podpack-pdf` does.
 
 ## 6. Models
 
@@ -791,7 +791,7 @@ An app cannot be run on a bare Flask app the way a plain blueprint can:
 The smallest thing that can host your app is a site, so keep a throwaway one in
 the repository.
 
-*(An app can be written to need no framework — `pp-pdf` runs both ways, with its
+*(An app can be written to need no framework — `podpack-pdf` runs both ways, with its
 own standalone layout and a test suite that registers its blueprint on a bare
 Flask app. That is more work and a second contract to keep; this guide covers
 apps written for podpack.)*
