@@ -725,7 +725,7 @@ wheels = [
 
 [[package]]
 name = "podpack"
-version = "0.9.1"
+version = "0.9.1+dev"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
