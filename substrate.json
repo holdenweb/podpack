@@ -78,7 +78,7 @@
     },
     "alembic/env.py": {
       "class": "verbatim",
-      "sha256": "e34af372f8937c99dfbb921f7d958142fe200e9f5cae5ff5829e019ab325dc82"
+      "sha256": "87d9ad1abd0a13c7a88eee4bfa21dd7fd3fbfac03aa7cadd2e6286d0c4917829"
     },
     "alembic/script.py.mako": {
       "class": "verbatim",
@@ -115,7 +115,7 @@
     },
     "config/postgresql.conf": {
       "class": "verbatim",
-      "sha256": "b4ba506fc5a5717ba6fed8f27270dd5918f8d7a38822b48e1af49ef1a54beb86"
+      "sha256": "521b0b7162b67ad971cd1051ac990012c3dfd487ed29edf3cf9a4b71d84013b6"
     },
     "container/healthcheck.py": {
       "class": "verbatim",
@@ -136,7 +136,7 @@
     },
     "scripts/backup.sh": {
       "class": "verbatim",
-      "sha256": "58721b291d822321ba29dbf0eef6b54405250f4ee439bb427f45019edc9cb626"
+      "sha256": "882e96502bc543b82be2e17d20db2ec594db7bbb1a466cc69bd5dfa2a5dd70cd"
     },
     "scripts/configure-host.py": {
       "class": "verbatim",
@@ -144,23 +144,23 @@
     },
     "scripts/dev.sh": {
       "class": "rendered",
-      "sha256": "95210aba142a47ca8e29574d8464999d6c173a8af2419e7a69366d313eee2d85"
+      "sha256": "b8b43c20a0830f34fb81e757fe363af24f4ea9fd9860b098a5a38ede7646b213"
     },
     "scripts/prepare-host-dirs.sh": {
       "class": "verbatim",
-      "sha256": "e3e0a3eca714caf363f4374f7eea4eadb8ad077f4cc61db2cdb4c1c11432acc8"
+      "sha256": "4cd582045bd967cde1e18fe3628dff43b70a41cd8cd04804754bc5d7bd4a9661"
     },
     "scripts/restore.sh": {
       "class": "verbatim",
-      "sha256": "842fe39c4c95f24e26595d566784dac99dd18278ebcb650697dd7510ea0b5785"
+      "sha256": "80322ccbbfc8f7135a00e8f82b2ca84dcd021e37abec6433e114ae48cbb7d63e"
     },
     "scripts/up.sh": {
       "class": "verbatim",
-      "sha256": "2ef3995ed7777b5d22246ca9fd1ba1a6a54f18f136bad883520db877479cf8d0"
+      "sha256": "3dc9e34ca1819c3c226178d7fbbf84534dd3f4220590a8b55a3a0d2820d164f0"
     },
     "scripts/verify-backup.sh": {
       "class": "verbatim",
-      "sha256": "ee79037bddb1459c8801576d44b116719b717a08ab8e44ddcceb42360ed36c6e"
+      "sha256": "68d7a61770c53052550329213af4984727d381748722c750385393f908a9be0b"
     },
     "secrets.env.example": {
       "class": "config",
@@ -176,6 +176,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.9.0b6",
+  "podpack_version": "0.9.1+dev",
   "substrate_schema": 1
 }

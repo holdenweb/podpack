@@ -69,11 +69,11 @@ jobs:
       - name: The substrate record is current
         # substrate.json must name the version whose files it holds, or a
         # rebuild ships stale substrate silently -- the recurring footgun this
-        # is meant to end. It is `continue-on-error` only because it is red
-        # today for a true reason: there are substrate changes not yet in a
-        # release, so the record trails the version. The release that ships them
-        # refreshes it (README: "A release that changes the substrate needs one
-        # more step first"); delete this one line then, so it can start failing
-        # the build for real.
-        continue-on-error: true
+        # is meant to end. This step carried `continue-on-error: true` from the
+        # day it was added until the record caught up with 0.9.1, so it was
+        # advisory for its whole life and never once failed a build. It fails
+        # them now. Red here means a substrate file moved without
+        # `substrate upgrade` recording it (README: "A release that changes the
+        # substrate needs one more step first"); run that, rather than excusing
+        # the step a second time.
         run: uv run podpack substrate status --check
