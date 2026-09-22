@@ -23,15 +23,24 @@ holdenweb.com; holdenweb.com is the proof that the goal was met.
 
 ## 2. The estate
 
+*The table below is as of 2026-09-22; §6 says what changed.*
+
 | Repository | Version | Published | Role |
 | --- | --- | --- | --- |
-| [`podpack`](https://github.com/holdenweb/podpack) | 0.8.0 | **PyPI** | the framework and the substrate |
-| [`podpack-qrcode`](https://github.com/holdenweb/podpack-qrcode) | 0.2.1 | tagged, not yet | app: QR code generator |
-| [`podpack-pages`](https://github.com/holdenweb/podpack-pages) | 0.2.0 | untagged | app: HTML/Markdown content |
-| [`podpack-pdf`](https://github.com/holdenweb/podpack-pdf) | 0.2.0 | tagged, not yet | app: PDF booklet maker and splitter |
-| [`podpack-notes`](https://github.com/holdenweb/podpack-notes) | 0.1.2 | tagged, not yet | app: notes, the guide's worked example |
-| `~/sites/holdenweb.com` | 1.6.0 | n/a | the real site; four apps installed |
+| [`podpack`](https://github.com/holdenweb/podpack) | 0.9.1 | **PyPI** | the framework and the substrate |
+| [`podpack-pages`](https://github.com/holdenweb/podpack-pages) | 0.3.3 | **PyPI** | app: HTML/Markdown content; ships three apps (ADR-0038) |
+| [`podpack-qrcode`](https://github.com/holdenweb/podpack-qrcode) | 0.2.2 | **PyPI** | app: QR code generator |
+| [`podpack-pdf`](https://github.com/holdenweb/podpack-pdf) | 0.2.2 | **PyPI** | app: PDF booklet maker and splitter |
+| [`podpack-notes`](https://github.com/holdenweb/podpack-notes) | 0.1.4 | **PyPI** | app: notes, the guide's worked example |
+| [`podpack-notebooks`](https://github.com/holdenweb/podpack-notebooks) | 0.1.2 | **PyPI** | app: Jupyter notebooks as static HTML |
+| `~/sites/holdenweb.com` | 1.8.3 | n/a | the real site; seven apps installed |
 | `~/sites/podpack-demo` | 0.2.0 | n/a | a site built *by following the guide* |
+
+All six distributions publish now. podpack was alone on the index from
+14 August; the four apps arrived together on 13 September and the last release
+of the set landed on 21 September. Each needed a *pending publisher*
+registered by the account holder before its workflow could fire, which is why
+this was never a task a session could finish.
 
 `podpack-demo` earns its place: it exists so that
 [`creating-a-site.md`](creating-a-site.md) is executable rather than
@@ -183,24 +192,36 @@ deducible from documentation.
 
 ## 6. Where it stands
 
-podpack 0.8.0 installs from PyPI and carries its substrate. All five packages
-have `tools/publish.py` and a trusted-publishing workflow; all tests pass
-(142 / 6 / 15 / 19 / 13). holdenweb.com is deployed and verified by a Playwright
-suite that drives a real browser against the running site.
+*Reviewed 2026-09-22.*
+
+podpack 0.9.1 installs from PyPI and carries its substrate. All six
+distributions have `tools/publish.py` and a trusted-publishing workflow, and
+all six are on PyPI. Tests, run rather than remembered: podpack 198, pages 76,
+qrcode 6, pdf 19, notes 23, notebooks 3, and holdenweb.com 38 unit plus a
+26-test Playwright suite that drives a real browser against the running site.
+podpack's CI runs pytest against a real PostgreSQL, mypy, and the substrate
+check on every push; each app repository runs pytest and mypy.
+
+**Closed since this section was written:**
+
+1. ~~**Publish the five apps.**~~ Done, 13–21 September. `podpack-notebooks`
+   took three attempts, two of which the tag-versus-`pyproject` gate refused —
+   working exactly as designed, and the reason a bad release never reached the
+   index.
+2. ~~**Retire the git sources.**~~ Done in holdenweb.com (9cd7a82,
+   2026-09-16): no `[tool.uv.sources]`, every dependency an ordinary version.
+   The payoff arrived with it — no `--refresh-package`, and a container build
+   that needs neither git nor a network to resolve. One git source is left in
+   the estate on purpose: `podpack-demo` pins podpack to the tag `r0.9.1`,
+   because the demo exists to prove the guide and the guide covers that case.
+   The app repositories keep a dev-only `[dependency-groups]` source for
+   podpack, which travels with nothing (writing-an-app.md rule 1).
 
 **Outstanding:**
 
-1. **Publish the five apps** — `podpack-pages`, `podpack-qrcode`, `podpack-pdf`,
-   `podpack-notes`, `podpack-notebooks`. Each needs a *pending publisher*
-   registered on PyPI first — the account holder's action, not something a
-   session can do. This said *four* until `podpack-notebooks` joined the estate
-   (September 2026); `podpack` itself is still the only one published, at 0.9.1.
-2. **Retire the git sources** once they are published: delete every
-   `[tool.uv.sources]` block and depend on versions. This is the payoff for
-   publishing, and the last item of the publication plan.
 3. **`podpack upgrade`** as one command — lock, sync, re-exec, apply the
-   substrate. Deferred deliberately until PyPI made `--refresh-package` stop
-   mattering.
+   substrate. No longer blocked: it was deferred until PyPI made
+   `--refresh-package` stop mattering, and that has happened.
 4. **The app shipped-data gap** ([ADR-0008](adrs/0008-shipped-app-data-seeds-once.md)):
    app data seeds once, so upgrading an app never delivers changed content to a
    host that already has the directory. Known, deliberate, unsolved.

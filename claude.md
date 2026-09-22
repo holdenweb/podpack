@@ -195,8 +195,10 @@ The image builds in two stages. `git` is installed at build time — uv shells o
 to it for a dependency locked to a git source, which is how an app not published
 to an index gets installed — but neither it nor uv nor uv's cache is needed to
 run the site. Leaving all three in the builder halves the image, 398MB to 203MB.
-Nothing is locked to a git source yet, so that layer is groundwork rather than
-load-bearing; it is there so the first such app fails on nothing.
+That layer is load-bearing now, though only just: every app publishes to PyPI,
+so a site normally needs no git at build time — holdenweb.com has needed none
+since 9cd7a82 — but `podpack-demo` pins podpack to the tag `r0.9.1` through a
+git source, and its build is the one that exercises the layer.
 
 Adding an app from outside the repo is therefore two operations, not one:
 `uv add` plus a rebuild puts the distribution *in the image*, and a line in
@@ -383,19 +385,25 @@ should wait until there are enough apps for the list to feel like a chore.
 
 ---
 
-## 6. `holdenweb.com`: adapted, on its `podpack` branch
+## 6. `holdenweb.com`: adapted, and long since merged
 
-Converted 2026-08-12/13 (branch `podpack` in that repo). Its factory delegates
+Converted 2026-08-12/13 on a branch called `podpack`, merged to `main`, which
+is where it has been developed since; the branch name survives only in this
+heading's history. Its factory delegates
 to `podpack.create_app(site_package="holdenweb", init=_wire)`; its own routes
 are the in-repo app `main` (front page, `/config`, `/ip`, `/python`, legacy
 redirects); content moved out to `podpack-pages` (one name space, Markdown
 searched before HTML, at `/pages/`), QR codes to `podpack-qrcode`, and the
 built-in PDF tools were deleted in favour of installing `podpack_pdf`. Its alembic
 history gained a true root revision, so a fresh database builds from empty —
-which is also what the `migrate` container needs. The two new apps live in
-/tmp at Steve's request until he creates their GitHub repositories; the site's
-sources are local paths until then, which is also why its container build is
-still blocked (a path source cannot survive a build).
+which is also what the `migrate` container needs. The two new apps then lived
+in /tmp, awaiting their GitHub repositories, and the site's sources were local
+paths — which is why its container build was
+blocked, a path source being unable to survive one. All of that is finished:
+both have repositories, both publish to PyPI, and the site names plain
+versions. It now installs seven apps from five distributions, `holdenweb`
+itself plus `podpack-pages` three times over (ADR-0038), `podpack-notebooks`,
+`podpack-qrcode` and `podpack-pdf`.
 
 ### Guardrails still outstanding from the original brief
 
@@ -443,16 +451,22 @@ rebuild rather than a reload, and `gunicorn --reload` covers development.
 
 ## 7. What's next
 
-1. **Publishing** (Steve's own checklist): GitHub repositories for
-   `podpack-pages` and `podpack-qrcode` (currently in /tmp), and pushing this
-   repository's and `podpack-pdf`'s unpushed commits. Until then every consuming
-   site locks local paths, and no container build can succeed.
-2. **Then holdenweb.com goes to git sources**: repoint its four
-   `[tool.uv.sources]`, `uv lock`, and its compose stack comes up — the
-   remaining step of its adaptation (§6).
-3. **The package-upgrade workflow**, deliberately postponed until the site is
-   fully operational: `uv lock --upgrade-package` is the interim mechanism,
-   not the answer.
+*Reviewed 2026-09-22: the first two are done and are kept struck rather than
+deleted, because the order they happened in is the argument for the third.*
+
+1. ~~**Publishing.**~~ Every app has a repository and publishes to PyPI by
+   trusted publishing. The path sources, and the container build they blocked,
+   are gone.
+2. ~~**Then holdenweb.com goes to git sources.**~~ Overtaken: it went straight
+   past git sources to plain versions (9cd7a82), because publishing landed
+   first. The git-source interim was planned and never needed.
+3. **The package-upgrade workflow**, still the open one, and now the only thing
+   between a release and a running site that a person has to remember.
+   `uv lock --upgrade-package` remains the interim mechanism. What `podpack
+   upgrade` should do is lock, sync, re-exec and apply the substrate as one
+   command — and the case for it got stronger in September, when this site's
+   substrate trailed its library by five days because the two steps are
+   separate and only one of them is obvious.
 4. Housekeeping: `base_url`. (The MongoDB lab is dealt with — see §4.)
 5. **Decide about `podpack-pdf`'s two discovery routes.** It exposes both a
    `holdenweb.apps` entry point resolving to a bare blueprint and a `site_app`

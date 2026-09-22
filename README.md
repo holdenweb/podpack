@@ -1239,11 +1239,12 @@ are needed to build the virtual environment and none of them to run it:
 | the `uv` binary | resolves and installs from the lockfile | 47 MB |
 | uv's download cache | populated as a side effect of `uv sync` | ~44 MB |
 
-No dependency is locked to a git source **yet**, so git is currently groundwork
-rather than load-bearing: the build would succeed without it today. It is
-installed ahead of need because the first app installed straight from a
-repository would otherwise fail the build with "Git executable not found",
-which names nothing that would lead you here.
+Every app publishes to PyPI now, so a site that takes them all from the index
+builds without needing git at all — `holdenweb.com` has, since 9cd7a82. The
+layer is still there, and is still right: `podpack-demo` pins podpack to the
+tag `r0.9.1` through a git source, so its build does need it, and any site
+installing an app straight from a repository would otherwise fail with "Git
+executable not found", which names nothing that would lead you here.
 
 Together that is roughly half the image: **398 MB single-stage against 203 MB**.
 The runtime stage copies the finished `.venv`, the source, the migration

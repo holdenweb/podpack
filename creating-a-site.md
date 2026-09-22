@@ -26,7 +26,9 @@ This document installs an app that already exists. To *write* one, see
 from `dev.env`, sourced into that shell; a new terminal between sections fails
 with no hint as to why.
 
-**Verified against podpack 0.9.0b2.**
+**Verified against podpack 0.9.0b2.** Re-read against 0.9.1 on 2026-09-22;
+what changed is that every app now publishes to PyPI, so the git sources this
+guide used to need are gone from the examples below.
 
 ---
 
@@ -55,20 +57,19 @@ dependencies = ["podpack", "podpack-notes"]
 [build-system]
 requires = ["uv_build>=0.8.4,<0.9.0"]
 build-backend = "uv_build"
-
-[tool.uv.sources]
-podpack-notes = { git = "https://github.com/holdenweb/podpack-notes.git" }
 ```
 
-**podpack needs no source entry**: it publishes to PyPI on every release tag, so
-an ordinary version specifier resolves it. Say `podpack>=0.9.0b2` if you want a
+**Neither needs a source entry, and that is new.** Both publish to PyPI on
+every release tag, so ordinary version specifiers resolve them and there is no
+`[tool.uv.sources]` block at all. Say `podpack>=0.9.0b2` if you want a
 pre-release — uv permits one only where the specifier names it, which opts that
 package in and nothing else.
 
-`podpack-notes` is the example app this guide installs, and still comes from git
-because it has no PyPI publisher yet; a site that wants no app can drop the line
-and the dependency. A git source resolves to what is **on the remote**, which is
-not necessarily what is on your disk.
+`podpack-notes` is the example app this guide installs; a site that wants no
+app can drop it from the dependencies. Until September 2026 it had no publisher
+and this step named a git source, which is the shape to reach for if you ever
+depend on an app that is not on an index — the section on deployment below
+keeps that case.
 
 *Working on podpack itself?* Then `podpack = { path = "/path/to/podpack",
 editable = true }` is what you want — but only for local work. A path source
@@ -216,7 +217,7 @@ prints them again if it cannot connect.
 > ```
 >
 > Authoring against the engine you deploy on is the whole point of authoring on
-> the host ([ADR-0011](adrs/0011-migrations-are-authored-on-the-host.md)).
+> the host ([ADR-0011](adrs/0011-revisions-authored-on-the-host.md)).
 
 Load it into this shell, and keep that shell for the next two steps:
 
@@ -348,20 +349,31 @@ needs a source entry at all:
 | | Source | Why |
 | --- | --- | --- |
 | `podpack` | none — a plain version specifier | published to PyPI on every release tag |
-| apps with a publisher | none | same |
-| apps without one yet | `{ git = "https://github.com/…" }` | `podpack-notes` is one of these |
+| apps with a publisher | none | same, and every app in the estate now has one |
+| an app without one | `{ git = "https://github.com/…" }` | nothing in the estate is in this position today |
+
+Since September 2026 the first two rows cover every case a site here meets, so
+a deployable site typically has **no `[tool.uv.sources]` block at all**. The
+third row is kept because the situation recurs the moment you write an app and
+want a site running on it before you cut its first release:
 
 ```toml
 [tool.uv.sources]
-podpack-notes = { git = "https://github.com/holdenweb/podpack-notes.git" }
+some-app = { git = "https://github.com/you/some-app.git", rev = "<tag or sha>" }
 ```
+
+**Name a tag or a sha, not a bare branch.** A bare branch resolves to whatever
+is on the remote at lock time, so two locks a week apart can differ with
+nothing in your tree to show why.
 
 **Then run `uv lock`.** Editing `[tool.uv.sources]` alone is not enough — the
 lockfile still carries the old source and the Containerfile builds with
 `--frozen`, so the build fails with exactly the error above and no indication
 that the fix was one command away. Moving a git-sourced dependency forward later
 needs `uv lock --upgrade-package X --refresh-package X`: uv caches the resolved
-ref, and without `--refresh-package` it moves silently or not at all.
+ref, and without `--refresh-package` it moves silently or not at all. A
+registry version needs neither flag, which is most of why publishing is worth
+the trouble.
 
 This is what the `git` layer in the Containerfile is for: uv shells out to a
 real `git` to fetch these, and the slim base image has none.
@@ -450,10 +462,17 @@ Honest notes, from doing this rather than imagining it.
   `PODPACK_PROXY_HOPS` the whole of its documentation went into
   `env.example`, so holdenweb.com — which has a proxy in front of it and
   needs the setting — will never be told: its own `.env.example` mentions the
-  variable zero times and always will, while podpack's ships it. The site was
-  upgraded, reported every file `ok`, and remained silently short of the one
-  thing the release was for. Watching podpack's own
+  variable zero times and always will, while podpack's ships it. Still true,
+  and checked again on 2026-09-22. The site was upgraded, reported every file
+  `ok`, and remained silently short of the one thing the release was for; the
+  host was eventually given the line by hand, and its rebuild procedure now
+  carries a whole part (`ops/rebuild.md` Part 4) devoted to a setting no
+  upgrade will ever deliver. Watching podpack's own
   `src/podpack/substrate/data/` is the only way to notice.
+
+  This is the clearest case for the fix recorded as backlog item 32: derive
+  the hop count from `PODPACK_ENVIRONMENT`, which podpack already delivers,
+  so the value follows the deployment instead of waiting to be remembered.
 - **Apps cannot ship migrations.** Every site installing an app regenerates that
   app's tables in its own history. Fine while a schema is stable; it is the same
   gap as the deferred app-upgrade problem.
