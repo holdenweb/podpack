@@ -17,7 +17,6 @@ import sqlalchemy as sa
 from flask import (
     Blueprint,
     Flask,
-    abort,
     current_app,
     jsonify,
     render_template,
@@ -27,6 +26,7 @@ from flask.typing import ResponseReturnValue
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
+from .auth import is_operator, operator_required
 from .paths import unclaimed
 from .proxy import deployment_environment, hops_source, proxy_hops
 from .registry import SiteApp
@@ -117,7 +117,7 @@ def healthz() -> ResponseReturnValue:
         # a host or a path. The container healthcheck reads the status code
         # and nothing else, so the public answer says only which app is
         # unwell; the sentence is in /_status, behind the guard.
-        operator = _is_operator()
+        operator = is_operator()
         body["apps"] = reports if operator else {
             name: {"status": report["status"]} for name, report in reports.items()
         }
@@ -222,23 +222,8 @@ def _proxy_report() -> dict[str, object]:
     }
 
 
-def _is_operator() -> bool:
-    """Whether this request may read the site's own configuration.
-
-    `auth.is_admin` unless the site replaced it (ADR-0033). An exception in it
-    counts as a refusal, and so does `None`: a guard that fails open is not a
-    guard, and `create_app` can no longer leave this unset in any case.
-    """
-    admin = current_app.extensions["podpack"].admin
-    if admin is None:
-        return False
-    try:
-        return bool(admin())
-    except Exception:  # noqa: BLE001 -- a broken guard denies, it does not admit
-        return False
-
-
 @core_blueprint.route("/_status")
+@operator_required
 def status() -> ResponseReturnValue:
     """Report where every piece of this site's state actually lives.
 
@@ -247,11 +232,6 @@ def status() -> ResponseReturnValue:
     named. It reports the app list too, so that "did my config edit take
     effect?" is answerable without reading the container's environment.
     """
-    if not _is_operator():
-        # 404 rather than 403: this route's existence, and the fact that a
-        # site is a podpack site at all, is itself information an operator
-        # has no reason to publish.
-        abort(404)
     state = current_app.extensions["podpack"]
     return jsonify(
         **_database_identity(),

@@ -28,6 +28,7 @@ from podpack import (
     app_config,
     create_app,
     db,
+    operator_required,
 )
 from podpack.auth import user_datastore
 from podpack.paths import data_dir, unclaimed
@@ -978,6 +979,86 @@ def test_a_guard_that_raises_denies(site: SiteFactory) -> None:
 
     app = site(admin=broken)
     assert app.test_client().get("/_status").status_code == 404
+
+
+def _guarded(app: Flask, rule: str, name: str) -> None:
+    """Register an operator-only route the way a site would."""
+
+    @app.route(rule, endpoint=name)
+    @operator_required
+    def view() -> str:
+        return name
+
+
+def test_operator_required_refuses_a_non_operator(site: SiteFactory) -> None:
+    """The decorator exists so a site's own operator-only route gets `/_status`'s
+    refusal without copying it. holdenweb.com's `/config` hand-rolled exactly
+    this -- predicate, try/except, `abort(404)` -- and that copy is the reason
+    this is here."""
+    app = site(admin=lambda: False)
+    _guarded(app, "/secret", "secret")
+    assert app.test_client().get("/secret").status_code == 404
+
+
+def test_operator_required_admits_an_operator(site: SiteFactory) -> None:
+    app = site(admin=lambda: True)
+    _guarded(app, "/secret", "secret")
+    response = app.test_client().get("/secret")
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "secret"
+
+
+def test_operator_required_denies_when_the_predicate_raises(site: SiteFactory) -> None:
+    def broken() -> bool:
+        raise RuntimeError("the role table is unreachable")
+
+    app = site(admin=broken)
+    _guarded(app, "/secret", "secret")
+    assert app.test_client().get("/secret").status_code == 404
+
+
+def test_operator_required_honours_a_replaced_predicate(site: SiteFactory) -> None:
+    """Why not flask-security's `roles_required`: it asks about `admin`
+    membership directly and walks straight past a predicate the site replaced
+    under ADR-0033, which is the one thing a site may change here."""
+    calls: list[bool] = []
+
+    def mine() -> bool:
+        calls.append(True)
+        return False
+
+    app = site(admin=mine)
+    _guarded(app, "/secret", "secret")
+    assert app.test_client().get("/secret").status_code == 404
+    assert calls, "the site's own predicate was never consulted"
+
+
+def test_operator_required_keeps_each_view_distinct(site: SiteFactory) -> None:
+    """`functools.wraps`, and it is load-bearing.
+
+    Flask names an endpoint after the function it is given unless told
+    otherwise, so without `wraps` every decorated view arrives called `wrapper`
+    and the second registration collides with the first. These deliberately do
+    *not* pass `endpoint=`, because passing it is what makes this pass whether
+    the decorator is written correctly or not -- which is how the first version
+    of this test managed to.
+    """
+    app = site(admin=lambda: True)
+
+    @app.route("/one")
+    @operator_required
+    def one() -> str:
+        return "one"
+
+    @app.route("/two")
+    @operator_required
+    def two() -> str:
+        return "two"
+
+    assert one.__name__ == "one" and two.__name__ == "two"
+    client = app.test_client()
+    assert client.get("/one").get_data(as_text=True) == "one"
+    assert client.get("/two").get_data(as_text=True) == "two"
 
 
 @pytest.fixture

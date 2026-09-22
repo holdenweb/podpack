@@ -18,7 +18,11 @@ except for its login clause. They are genuinely per-site: a site picks its own
 mail server, or sends no mail.
 """
 
-from flask import Flask
+import functools
+from collections.abc import Callable
+from typing import ParamSpec, TypeVar
+
+from flask import Flask, abort, current_app
 from flask_security import Security, SQLAlchemyUserDatastore, current_user
 from flask_security.models import fsqla_v3 as fsqla
 
@@ -80,6 +84,55 @@ def is_admin() -> bool:
     rather than leaving to be discovered.
     """
     return bool(current_user.is_authenticated and current_user.has_role(ADMIN_ROLE))
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def is_operator() -> bool:
+    """Whether this request is an operator's, through the site's own predicate.
+
+    `is_admin` unless the site replaced it (ADR-0033), reached through
+    `extensions["podpack"].admin` so that the replacement is honoured. An
+    exception in it counts as a refusal, and so does `None`: a guard that fails
+    open is not a guard.
+    """
+    admin = current_app.extensions["podpack"].admin
+    if admin is None:
+        return False
+    try:
+        return bool(admin())
+    except Exception:  # noqa: BLE001 -- a broken guard denies, it does not admit
+        return False
+
+
+def operator_required(view: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Refuse a route to anyone who is not an operator, with a 404.
+
+    Two things make this worth a decorator of podpack's own rather than
+    flask-security's `roles_required`, and both are about what a refusal says:
+
+    * **404, not 403.** A 403 confirms the route exists, and that this is a
+      podpack site at all -- information an operator has no reason to publish.
+      `/_status` has answered 404 since it was written, for that reason.
+    * **The site's predicate, not the role directly.** `roles_required` asks
+      flask-security about `admin` membership and so walks straight past a
+      predicate the site replaced under ADR-0033, which is the one thing a site
+      is entitled to change here.
+
+    It was hand-rolled in two places before this existed -- podpack's own
+    `/_status` and holdenweb.com's `/config` -- which is one copy more than a
+    guard should ever have.
+    """
+
+    @functools.wraps(view)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if not is_operator():
+            abort(404)
+        return view(*args, **kwargs)
+
+    return wrapper
 
 
 def install(app: Flask, mail_util_cls: type | None = None) -> None:

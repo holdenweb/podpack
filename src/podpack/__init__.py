@@ -19,7 +19,7 @@ from flask import Flask
 from jinja2 import ChoiceLoader, PackageLoader
 
 from . import auth
-from .auth import ADMIN_ROLE, User, is_admin
+from .auth import ADMIN_ROLE, User, is_admin, is_operator, operator_required
 from .config import (
     app_config,
     check_secrets,
@@ -47,6 +47,8 @@ __all__ = [
     "create_app",
     "db",
     "is_admin",
+    "is_operator",
+    "operator_required",
     "proxy_hops",
     "sections",
 ]
