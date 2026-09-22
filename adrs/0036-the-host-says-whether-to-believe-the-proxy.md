@@ -1,6 +1,10 @@
 # ADR-0036: The host says whether to believe the proxy
 
-**Status:** Accepted
+**Status:** Accepted, and amended by
+[ADR-0039](0039-the-hop-count-follows-the-deployment.md), which keeps every
+argument below and changes only how the host says it: the count is derived
+from `PODPACK_ENVIRONMENT` unless `PODPACK_PROXY_HOPS` overrides it, because a
+value no upgrade can deliver is one that gets forgotten.
 
 **Date:** 2026-08-21
 

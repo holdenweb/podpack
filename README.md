@@ -1291,7 +1291,7 @@ essentially as it stands. The mapping:
 | --- | --- |
 | an **Nginx Proxy Port** app's port assignment | `WEB_HOST_PORT` in `.env` |
 | the app directory `~/apps/<name>/` | `HOST_DATA_DIR`, `HOST_LOG_DIR` in `.env` |
-| an nginx in front of you, terminating TLS | `PODPACK_PROXY_HOPS=1` in `.env` |
+| an nginx in front of you, terminating TLS | nothing — `PODPACK_ENVIRONMENT` already says so |
 | the site domain | **nowhere** — see below |
 
 That is the whole of it, which is the point: the port a managed host allocates is
@@ -1318,8 +1318,15 @@ It does not need telling. Every URL a site builds is built inside the request
 that asked for it, and nginx passes the visitor's `Host` through — so the site
 answers correctly under whatever name reaches it, including one nobody knew
 about when it was deployed. What nginx does *not* pass through is the scheme:
-the visitor arrives over TLS and the proxy forwards plain HTTP, so without
-`PODPACK_PROXY_HOPS=1` every absolute URL comes out `http://`.
+the visitor arrives over TLS and the proxy forwards plain HTTP, so a site that
+does not read `X-Forwarded-Proto` builds every absolute URL as `http://`.
+
+Reading it is permission the deployment grants, and it grants it by being a
+deployment: the count comes from `PODPACK_ENVIRONMENT`, so a host with
+anything other than `local` there trusts one proxy and needs no further line
+([ADR-0039](adrs/0039-the-hop-count-follows-the-deployment.md)). Set
+`PODPACK_PROXY_HOPS` only for a second proxy, or to say `0` where a non-local
+site has none in front of it at all.
 
 Nothing looks broken when that is wrong. Every page serves; only absolute URLs
 are affected, and nginx redirects them to `https` anyway. The first sign is a

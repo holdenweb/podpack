@@ -395,20 +395,30 @@ provider, `podman.socket`, lingering. It **refuses to overwrite** either file,
 and `--check` inspects without writing anything, which is the one to reach for
 on a host somebody else set up.
 
-Then, in `.env`, if anything proxies to this site:
+Nothing further is needed for the proxy, and that is worth saying because it
+used to be. Setting `PODPACK_ENVIRONMENT` to anything but `local` — which
+`configure-host.py` has just done — is what tells the site to read
+`X-Forwarded-Proto`, so a host behind one nginx is already right
+([ADR-0039](adrs/0039-the-hop-count-follows-the-deployment.md)).
+
+Two deployments still say something explicitly, in `.env`:
 
 ```bash
-PODPACK_PROXY_HOPS=1
+PODPACK_PROXY_HOPS=2
 ```
 
-Without it every URL the site builds with `_external=True` comes out `http://`,
-because the proxy forwards plain HTTP and podpack will not believe an
-`X-Forwarded-Proto` it has not been told to trust. Nothing logs it and no page
-looks wrong; the first thing to carry such a URL is usually a password-reset
-mail, so it surfaces in somebody's inbox. `/_status` reports `proxy`, with the
-header as received beside the count trusted, which is how to check it without
-sending yourself a reset. The count is the number of values in the header, not
-the number of proxies — see
+for a second proxy, or `0` where a non-local site has nothing in front of it
+at all — because unset no longer means zero once the environment is not
+`local`.
+
+Get the count too low and every URL the site builds with `_external=True`
+comes out `http://`, because the proxy forwards plain HTTP and podpack will
+not believe an `X-Forwarded-Proto` it has not been told to trust. Nothing logs
+it and no page looks wrong; the first thing to carry such a URL is usually a
+password-reset mail, so it surfaces in somebody's inbox. `/_status` reports
+`proxy`, with the header as received beside the count trusted and the variable
+that decided it, which is how to check without sending yourself a reset. The
+count is the number of values in the header, not the number of proxies — see
 [ADR-0036](adrs/0036-the-host-says-whether-to-believe-the-proxy.md).
 
 ### Backing it up

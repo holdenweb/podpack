@@ -43,6 +43,31 @@ as it arrives. That is the right default rather than a cautious one: a site
 with nothing in front of it must not believe a forwarded header, and a site
 with something in front says so once, on the host where it is true.
 
+## Why the count is usually derived, and not set
+
+`PODPACK_PROXY_HOPS` was a value every deployment had to set and keep correct,
+and it is the one variable podpack cannot deliver: its whole documentation
+lives in `env.example`, a *seeded* substrate file that `podpack substrate
+upgrade` never rewrites (ADR-0026). So an existing site is never told the
+variable exists, and the failure when it is forgotten is silent -- every page
+serves and only absolute URLs are wrong.
+
+But the value was never really free. It is a function of how the site is
+deployed, and `PODPACK_ENVIRONMENT` already records that: `local` for a lab,
+anything else for a real deployment behind a real proxy. So the count is
+derived from it -- zero when local, one otherwise -- and a derived value
+cannot be forgotten, cannot go undelivered, and cannot drift from the
+deployment it describes.
+
+`PODPACK_PROXY_HOPS` remains, and still wins where it is set. Two deployments
+need it: one behind two proxies, and a non-local one behind none, which must
+now say `PODPACK_PROXY_HOPS=0` rather than leaving it unset. Both are unusual
+enough to be worth an explicit line; the common case is no line at all.
+
+**An unrecognised environment counts as not-local**, matching
+`prepare-host-dirs.sh`, which made the same choice for the same reason: a typo
+in that variable should not quietly turn a real deployment into a lab.
+
 ## Why gunicorn's own setting is not enough
 
 gunicorn will do this itself, but only for a peer address in
@@ -58,33 +83,80 @@ from flask import Flask
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 PROXY_HOPS = "PODPACK_PROXY_HOPS"
-"""Names the environment variable, so the checks and the message agree."""
+"""Names the override variable, so the checks and the messages agree."""
+
+ENVIRONMENT = "PODPACK_ENVIRONMENT"
+"""The variable the count is derived from when the override is absent."""
+
+LOCAL = "local"
+"""The one value meaning "nothing is in front of this"; unset means this too."""
+
+HOPS_WHEN_DEPLOYED = 1
+"""What a non-local deployment gets: one nginx between it and the internet.
+
+A deployment with a second proxy says so with `PODPACK_PROXY_HOPS`, which is
+the whole reason the override survives. One is not a guess at the general
+case; it is the only topology this substrate deploys into, and the substrate
+is what puts a site behind a proxy in the first place.
+"""
 
 
-def proxy_hops() -> int:
-    """How many proxies this host has said to believe. Zero if it has not.
+def deployment_environment() -> str:
+    """Which kind of deployment this is. `local` when nothing says otherwise.
 
-    Refuses a value it cannot read rather than falling back to zero: an
-    unparseable count is a deployment somebody meant to proxy, and silently
-    serving it unproxied reproduces exactly the bug this module exists to fix.
+    Unset means `local` for the same reason `prepare-host-dirs.sh` says so:
+    every site created before the variable existed is effectively a lab, and
+    breaking them to make a point would be the wrong trade.
+    """
+    return os.environ.get(ENVIRONMENT, "").strip() or LOCAL
+
+
+def declared_hops() -> int | None:
+    """What `PODPACK_PROXY_HOPS` says, or `None` where it says nothing.
+
+    Refuses a value it cannot read rather than falling back: an unparseable
+    count is a deployment somebody meant to proxy, and silently serving it
+    unproxied reproduces exactly the bug this module exists to fix. Note that
+    an explicit `0` is *not* nothing -- it is how a non-local deployment with
+    no proxy declines the hop it would otherwise be given.
     """
     raw = os.environ.get(PROXY_HOPS, "").strip()
     if not raw:
-        return 0
+        return None
     try:
         hops = int(raw)
     except ValueError:
         raise RuntimeError(
             f"{PROXY_HOPS} is {raw!r}, which is not a whole number. It counts "
             "the proxies between the internet and this site: 1 where a single "
-            "nginx forwards to it, unset where nothing does."
+            "nginx forwards to it, 0 where nothing does. Unset it to let "
+            f"{ENVIRONMENT} decide."
         ) from None
     if hops < 0:
         raise RuntimeError(
             f"{PROXY_HOPS} is {hops}, and a count of proxies cannot be "
-            "negative. Unset it to trust none."
+            "negative. Set it to 0 to trust none."
         )
     return hops
+
+
+def proxy_hops() -> int:
+    """How many proxies to believe: what was declared, else what is deployed."""
+    declared = declared_hops()
+    if declared is not None:
+        return declared
+    return 0 if deployment_environment() == LOCAL else HOPS_WHEN_DEPLOYED
+
+
+def hops_source() -> str:
+    """Which variable decided the count, for `/_status` to report.
+
+    The number alone does not say whether somebody chose it or it followed
+    from the environment, and those are fixed in different files.
+    """
+    if declared_hops() is not None:
+        return PROXY_HOPS
+    return ENVIRONMENT
 
 
 def trust_proxy(app: Flask, hops: int) -> None:

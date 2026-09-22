@@ -23,7 +23,7 @@ instrument.
 import pytest
 from flask import Flask, url_for
 
-from podpack.proxy import PROXY_HOPS, proxy_hops
+from podpack.proxy import ENVIRONMENT, PROXY_HOPS, proxy_hops
 
 from conftest import SiteFactory
 
@@ -58,6 +58,7 @@ def test_an_unproxied_site_does_not_believe_the_header(
     front of it is reachable by whoever forged it.
     """
     monkeypatch.delenv(PROXY_HOPS, raising=False)
+    monkeypatch.delenv(ENVIRONMENT, raising=False)
 
     assert link(mailing_site(site), **HTTPS).startswith("http://")
 
@@ -132,6 +133,8 @@ def test_status_reports_what_the_proxy_said_and_what_was_concluded(
 
     assert reported == {
         "hops_trusted": 1,
+        "hops_from": PROXY_HOPS,
+        "environment": "local",
         "forwarded_proto": "https",
         "scheme": "https",
         "host": "os.example.com",
@@ -143,11 +146,14 @@ def test_status_says_when_no_header_arrived(
 ) -> None:
     """`(not sent)` and `http` separate the two ways of getting this wrong."""
     monkeypatch.delenv(PROXY_HOPS, raising=False)
+    monkeypatch.delenv(ENVIRONMENT, raising=False)
 
     reported = site().test_client().get("/_status").get_json()["proxy"]
 
     assert reported == {
         "hops_trusted": 0,
+        "hops_from": ENVIRONMENT,
+        "environment": "local",
         "forwarded_proto": "(not sent)",
         "scheme": "http",
         "host": "localhost",
@@ -177,5 +183,128 @@ def test_a_blank_setting_is_the_same_as_none(
 ) -> None:
     """A variable left empty in `.env` is somebody not setting it."""
     monkeypatch.setenv(PROXY_HOPS, value)
+    monkeypatch.delenv(ENVIRONMENT, raising=False)
 
     assert proxy_hops() == 0
+
+
+# ---------------------------------------------------------------------------
+# Deriving the count from the deployment (backlog 32)
+#
+# The variable these replace was the one podpack could never deliver -- its
+# documentation lives in a seeded `env.example` that `substrate upgrade` never
+# rewrites -- so a real deployment that forgot it served every absolute URL as
+# `http://` and said nothing. `PODPACK_ENVIRONMENT` is delivered, and already
+# records the only fact the hop count depends on.
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_a_deployment_believes_one_proxy_without_being_told(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    """The point of the change: the common case needs no line in `.env`."""
+    monkeypatch.delenv(PROXY_HOPS, raising=False)
+    monkeypatch.setenv(ENVIRONMENT, environment)
+
+    assert proxy_hops() == 1
+
+
+@pytest.mark.parametrize("environment", ["local", ""])
+def test_a_lab_believes_nothing(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    """Zero for a lab, and for a site whose `.env` predates the variable."""
+    monkeypatch.delenv(PROXY_HOPS, raising=False)
+    monkeypatch.setenv(ENVIRONMENT, environment)
+
+    assert proxy_hops() == 0
+
+
+def test_an_absent_environment_is_a_lab(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(PROXY_HOPS, raising=False)
+    monkeypatch.delenv(ENVIRONMENT, raising=False)
+
+    assert proxy_hops() == 0
+
+
+@pytest.mark.parametrize("environment", ["Local", "prod", "local ", "LOCAL"])
+def test_an_unrecognised_environment_is_not_a_lab(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    """Matching `prepare-host-dirs.sh`, and for its reason.
+
+    A typo must not quietly turn a real deployment into a lab. Here that would
+    mean a proxied site declining to read `X-Forwarded-Proto` because somebody
+    capitalised the word -- which is the original bug, reintroduced by a
+    spelling mistake. Note `"local "`: `.env` is not a shell and does not strip
+    trailing spaces, but this does, so that one *is* a lab.
+    """
+    monkeypatch.delenv(PROXY_HOPS, raising=False)
+    monkeypatch.setenv(ENVIRONMENT, environment)
+
+    assert proxy_hops() == (0 if environment.strip() == "local" else 1)
+
+
+def test_a_declared_count_overrides_the_deployment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two proxies is the case the override exists for."""
+    monkeypatch.setenv(ENVIRONMENT, "production")
+    monkeypatch.setenv(PROXY_HOPS, "2")
+
+    assert proxy_hops() == 2
+
+
+def test_a_deployment_can_decline_the_hop_it_would_be_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The behaviour change with teeth, so it is pinned.
+
+    Before the count was derived, *unset* meant zero everywhere. A non-local
+    deployment with nothing in front of it must now say zero explicitly, and
+    an explicit zero has to be distinguishable from saying nothing -- which is
+    why `declared_hops` returns `None` rather than falling back.
+    """
+    monkeypatch.setenv(ENVIRONMENT, "production")
+    monkeypatch.setenv(PROXY_HOPS, "0")
+
+    assert proxy_hops() == 0
+
+
+def test_a_derived_hop_is_actually_installed(
+    site: SiteFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end, because `proxy_hops` returning 1 proves only arithmetic.
+
+    The middleware has to be installed and the header believed, through the
+    test client, for the reset link this whole module exists for to come out
+    `https://`.
+    """
+    monkeypatch.delenv(PROXY_HOPS, raising=False)
+    monkeypatch.setenv(ENVIRONMENT, "production")
+
+    assert link(mailing_site(site), **HTTPS) == "https://os.example.com/_status"
+
+
+def test_status_says_which_variable_decided(
+    site: SiteFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A derived count and a declared one are corrected in different files."""
+    monkeypatch.delenv(PROXY_HOPS, raising=False)
+    monkeypatch.setenv(ENVIRONMENT, "staging")
+
+    reported = (
+        site()
+        .test_client()
+        .get("/_status", base_url="http://os.example.com", headers=HTTPS)
+        .get_json()["proxy"]
+    )
+
+    assert reported == {
+        "hops_trusted": 1,
+        "hops_from": ENVIRONMENT,
+        "environment": "staging",
+        "forwarded_proto": "https",
+        "scheme": "https",
+        "host": "os.example.com",
+    }

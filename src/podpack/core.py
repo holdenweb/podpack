@@ -28,7 +28,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
 from .paths import unclaimed
-from .proxy import proxy_hops
+from .proxy import deployment_environment, hops_source, proxy_hops
 from .registry import SiteApp
 
 core_blueprint = Blueprint("podpack", __name__)
@@ -205,9 +205,17 @@ def _proxy_report() -> dict[str, object]:
     not been told to trust, and the remedy differs. This is also the only way
     to settle the question on a running host without sending a password-reset
     mail to somebody and reading the link out of it.
+
+    `hops_from` and `environment` are here because the count is normally
+    *derived* now: the number alone does not say whether somebody chose it or
+    it followed from the deployment, and the two are corrected in different
+    places -- one in `.env` on this host, the other by admitting what kind of
+    deployment this is.
     """
     return {
         "hops_trusted": proxy_hops(),
+        "hops_from": hops_source(),
+        "environment": deployment_environment(),
         "forwarded_proto": request.headers.get("X-Forwarded-Proto", "(not sent)"),
         "scheme": request.scheme,
         "host": request.host,
