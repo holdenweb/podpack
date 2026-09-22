@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 680" width="1000" height="680"
+     role="img" aria-label="The podpack estate: one framework and five app distributions, each released on its own tag to PyPI, assembled into two different sites by nothing more than a configuration file and a list of installed apps.">
+  <title>The podpack estate — six distributions, two sites</title>
+  <desc>Five app distributions (podpack-pages, podpack-notebooks, podpack-qrcode, podpack-pdf, podpack-notes) are written and tagged separately, each published to pypi.org at its own version. Four of them are installed on holdenweb.com, where they mount seven apps between them — podpack-pages alone supplies three — alongside the site's own unpublished front-page app. The fifth, podpack-notes, is the only app on podpack-demo, the site that exists so the site-building guide stays executable. Underneath both sits podpack itself, the framework and container substrate, which every site installs and no app declares as a dependency.</desc>
+
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4646e9"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6c6f77"/>
+    </marker>
+  </defs>
+
+  <rect width="1000" height="680" fill="#f6f6ef"/>
+
+  <g font-family="'Gill Sans','Gill Sans MT',Cabin,'Trebuchet MS',sans-serif">
+    <text x="24" y="38" font-size="23" font-weight="600" fill="#0d2a8f">The podpack estate — six distributions, two sites</text>
+    <text x="24" y="60" font-size="12.5" fill="#6c6f77" font-family="-apple-system,'Segoe UI',Arial,sans-serif">One framework, five apps, each versioned and released on its own. Versions as at 2026-09-22.</text>
+
+    <g font-size="10.5" font-weight="600" fill="#6c6f77" letter-spacing="1.2" text-anchor="middle">
+      <text x="149" y="100">WRITTEN AND TAGGED</text>
+      <text x="376" y="100">ON pypi.org</text>
+      <text x="736" y="100">INSTALLED, AND MOUNTED AT</text>
+    </g>
+  </g>
+
+  <!-- the shelf -->
+  <rect x="310" y="125" width="132" height="320" rx="10" fill="#ecedfc" stroke="#5475ee" stroke-width="1"/>
+
+  <g font-family="-apple-system,'Segoe UI',Arial,sans-serif" font-size="11" fill="#3a3c42">
+
+    <!-- podpack-pages -->
+    <rect x="24" y="131" width="250" height="50" rx="7" fill="#fff" stroke="#e7e4d4"/>
+    <text x="36" y="151" font-weight="600" fill="#0d2a8f">podpack-pages</text>
+    <text x="36" y="167" font-size="10" fill="#6c6f77">content trees — and three apps, not one</text>
+    <line x1="278" y1="156" x2="314" y2="156" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <rect x="318" y="142" width="116" height="28" rx="6" fill="#fff" stroke="#5475ee"/>
+    <text x="376" y="161" font-size="13" font-weight="600" fill="#0d2a8f" text-anchor="middle">0.3.4</text>
+
+    <!-- podpack-notebooks -->
+    <rect x="24" y="189" width="250" height="50" rx="7" fill="#fff" stroke="#e7e4d4"/>
+    <text x="36" y="209" font-weight="600" fill="#0d2a8f">podpack-notebooks</text>
+    <text x="36" y="225" font-size="10" fill="#6c6f77">notebooks as static HTML, via PagesApp</text>
+    <line x1="278" y1="214" x2="314" y2="214" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <rect x="318" y="200" width="116" height="28" rx="6" fill="#fff" stroke="#5475ee"/>
+    <text x="376" y="219" font-size="13" font-weight="600" fill="#0d2a8f" text-anchor="middle">0.1.2</text>
+
+    <!-- podpack-qrcode -->
+    <rect x="24" y="247" width="250" height="50" rx="7" fill="#fff" stroke="#e7e4d4"/>
+    <text x="36" y="267" font-weight="600" fill="#0d2a8f">podpack-qrcode</text>
+    <text x="36" y="283" font-size="10" fill="#6c6f77">QR codes from a form</text>
+    <line x1="278" y1="272" x2="314" y2="272" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <rect x="318" y="258" width="116" height="28" rx="6" fill="#fff" stroke="#5475ee"/>
+    <text x="376" y="277" font-size="13" font-weight="600" fill="#0d2a8f" text-anchor="middle">0.2.2</text>
+
+    <!-- podpack-pdf -->
+    <rect x="24" y="305" width="250" height="50" rx="7" fill="#fff" stroke="#e7e4d4"/>
+    <text x="36" y="325" font-weight="600" fill="#0d2a8f">podpack-pdf</text>
+    <text x="36" y="341" font-size="10" fill="#6c6f77">booklet imposition and page splitting</text>
+    <line x1="278" y1="330" x2="314" y2="330" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <rect x="318" y="316" width="116" height="28" rx="6" fill="#fff" stroke="#5475ee"/>
+    <text x="376" y="335" font-size="13" font-weight="600" fill="#0d2a8f" text-anchor="middle">0.2.2</text>
+
+    <!-- podpack-notes, set apart: the one app holdenweb.com does not install -->
+    <rect x="24" y="387" width="250" height="50" rx="7" fill="#fff" stroke="#e7e4d4"/>
+    <text x="36" y="407" font-weight="600" fill="#0d2a8f">podpack-notes</text>
+    <text x="36" y="423" font-size="10" fill="#6c6f77">the worked example in creating-a-site.md</text>
+    <line x1="278" y1="412" x2="314" y2="412" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <rect x="318" y="398" width="116" height="28" rx="6" fill="#fff" stroke="#5475ee"/>
+    <text x="376" y="417" font-size="13" font-weight="600" fill="#0d2a8f" text-anchor="middle">0.1.4</text>
+
+    <!-- shelf to holdenweb.com: four distributions, seven apps -->
+    <line x1="438" y1="156" x2="492" y2="176" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <line x1="438" y1="214" x2="492" y2="206" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <line x1="438" y1="272" x2="492" y2="236" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <line x1="438" y1="330" x2="492" y2="266" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <!-- shelf to podpack-demo -->
+    <line x1="438" y1="412" x2="492" y2="412" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+
+    <!-- holdenweb.com -->
+    <rect x="496" y="112" width="480" height="188" rx="9" fill="#fff" stroke="#e7e4d4"/>
+    <text x="512" y="137" font-size="13.5" font-weight="600" fill="#0d2a8f">holdenweb.com 1.8.4+dev</text>
+    <text x="512" y="154" font-size="10" fill="#6c6f77">the real site: one container, seven apps, one navigation</text>
+
+    <rect x="512" y="166" width="104" height="38" rx="6" fill="#f6f6ef" stroke="#6c6f77" stroke-dasharray="4 3"/>
+    <text x="564" y="184" font-size="12" font-weight="600" fill="#0d2a8f" text-anchor="middle">/</text>
+    <text x="564" y="197" font-size="8.5" fill="#6c6f77" text-anchor="middle">its own repository</text>
+    <rect x="626" y="166" width="104" height="38" rx="6" fill="#f6f6ef" stroke="#e7e4d4"/>
+    <text x="678" y="184" font-size="12" font-weight="600" fill="#0d2a8f" text-anchor="middle">/pybooks</text>
+    <text x="678" y="197" font-size="8.5" fill="#6c6f77" text-anchor="middle">podpack-pages</text>
+    <rect x="740" y="166" width="104" height="38" rx="6" fill="#f6f6ef" stroke="#e7e4d4"/>
+    <text x="792" y="184" font-size="12" font-weight="600" fill="#0d2a8f" text-anchor="middle">/blog</text>
+    <text x="792" y="197" font-size="8.5" fill="#6c6f77" text-anchor="middle">podpack-pages</text>
+    <rect x="854" y="166" width="104" height="38" rx="6" fill="#f6f6ef" stroke="#e7e4d4"/>
+    <text x="906" y="184" font-size="12" font-weight="600" fill="#0d2a8f" text-anchor="middle">/notebooks</text>
+    <text x="906" y="197" font-size="8.5" fill="#6c6f77" text-anchor="middle">podpack-notebooks</text>
+
+    <rect x="512" y="212" width="104" height="38" rx="6" fill="#f6f6ef" stroke="#e7e4d4"/>
+    <text x="564" y="230" font-size="12" font-weight="600" fill="#0d2a8f" text-anchor="middle">/pages</text>
+    <text x="564" y="243" font-size="8.5" fill="#6c6f77" text-anchor="middle">podpack-pages</text>
+    <rect x="626" y="212" width="104" height="38" rx="6" fill="#f6f6ef" stroke="#e7e4d4"/>
+    <text x="678" y="230" font-size="12" font-weight="600" fill="#0d2a8f" text-anchor="middle">/qrcode</text>
+    <text x="678" y="243" font-size="8.5" fill="#6c6f77" text-anchor="middle">podpack-qrcode</text>
+    <rect x="740" y="212" width="104" height="38" rx="6" fill="#f6f6ef" stroke="#e7e4d4"/>
+    <text x="792" y="230" font-size="12" font-weight="600" fill="#0d2a8f" text-anchor="middle">/pdf</text>
+    <text x="792" y="243" font-size="8.5" fill="#6c6f77" text-anchor="middle">podpack-pdf</text>
+
+    <text x="512" y="271" font-size="10" fill="#3a3c42">In installation order, which is also the order of the navigation. One distribution can ship</text>
+    <text x="512" y="285" font-size="10" fill="#3a3c42">several apps: <tspan font-weight="600">podpack-pages</tspan> supplies three of these seven; the front page is this site's own.</text>
+
+    <!-- podpack-demo -->
+    <rect x="496" y="372" width="480" height="98" rx="9" fill="#fff" stroke="#e7e4d4"/>
+    <text x="512" y="397" font-size="13.5" font-weight="600" fill="#0d2a8f">podpack-demo 0.2.0</text>
+    <text x="512" y="414" font-size="10" fill="#6c6f77">a site built by following creating-a-site.md, so the guide stays executable</text>
+    <rect x="512" y="424" width="104" height="38" rx="6" fill="#f6f6ef" stroke="#e7e4d4"/>
+    <text x="564" y="442" font-size="12" font-weight="600" fill="#0d2a8f" text-anchor="middle">/notes</text>
+    <text x="564" y="455" font-size="8.5" fill="#6c6f77" text-anchor="middle">podpack-notes</text>
+    <text x="630" y="438" font-size="10" fill="#3a3c42">Its only app — and the only one holdenweb.com does not install.</text>
+    <text x="630" y="453" font-size="10" fill="#3a3c42">The root here is the framework's own page — no app claims it.</text>
+
+    <!-- the framework, deliberately separate -->
+    <line x1="24" y1="494" x2="976" y2="494" stroke="#e7e4d4"/>
+    <text x="24" y="518" font-size="10.5" font-weight="600" fill="#6c6f77" letter-spacing="1.2" font-family="'Gill Sans','Gill Sans MT',Cabin,sans-serif">UNDERNEATH BOTH, THE FRAMEWORK ITSELF</text>
+
+    <rect x="24" y="532" width="250" height="58" rx="7" fill="#fff" stroke="#5475ee"/>
+    <text x="36" y="552" font-weight="600" fill="#0d2a8f">podpack</text>
+    <text x="36" y="568" font-size="10" fill="#6c6f77">the Flask framework and the container substrate</text>
+    <text x="36" y="582" font-size="10" fill="#6c6f77">serves /healthz, /_status and login on every site</text>
+    <line x1="278" y1="558" x2="314" y2="558" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <rect x="318" y="544" width="116" height="28" rx="6" fill="#ecedfc" stroke="#5475ee"/>
+    <text x="376" y="563" font-size="13" font-weight="600" fill="#0d2a8f" text-anchor="middle">0.9.3</text>
+
+    <line x1="438" y1="552" x2="492" y2="285" stroke="#4646e9" stroke-width="1.4" marker-end="url(#a)"/>
+    <line x1="438" y1="566" x2="492" y2="448" stroke="#6c6f77" stroke-width="1.3" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+
+    <text x="506" y="552" font-size="10.5" font-weight="600" fill="#0d2a8f">Every site installs it; no app declares it.</text>
+    <text x="506" y="567" font-size="10" fill="#3a3c42">An app is loaded by podpack, so the framework is there by construction wherever an app runs —</text>
+    <text x="506" y="581" font-size="10" fill="#3a3c42">and naming it as a dependency would let an app pin the framework version of the site installing it.</text>
+    <text x="506" y="595" font-size="10" fill="#3a3c42">holdenweb.com takes it from the index; podpack-demo is still pinned to the git tag <tspan font-weight="600">r0.9.1</tspan> (dashed).</text>
+
+    <text x="24" y="634" font-size="11.5" fill="#3a3c42">A site is a configuration file plus a list of installed apps — which is why two sites this different are assembled from the same shelf.</text>
+    <text x="24" y="653" font-size="10" fill="#6c6f77">Everything reaches the shelf the same way: <tspan font-weight="600">git tag r&lt;version&gt;</tspan>, then a workflow that refuses to publish unless the tag matches the version in <tspan font-weight="600">pyproject.toml</tspan>, runs the tests, and</text>
+    <text x="24" y="668" font-size="10" fill="#6c6f77">uploads through PyPI trusted publishing. No token exists anywhere in this picture — and each distribution carries its own version, so nothing here releases on anything else's schedule.</text>
+  </g>
+</svg>
