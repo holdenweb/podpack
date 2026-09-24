@@ -30,3 +30,4 @@ src/instance/
 dev.env
 devdata/
 devlogs/
+.DS_Store
