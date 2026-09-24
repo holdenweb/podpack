@@ -176,6 +176,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.9.1+dev",
+  "podpack_version": "0.9.4",
   "substrate_schema": 1
 }
