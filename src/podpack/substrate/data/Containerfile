@@ -23,8 +23,9 @@ COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /usr/local/bin/uv
 # and the slim base has none. An app installed straight from its repository --
 # the ordinary case for one not published to an index -- therefore fails the
 # build with "Git executable not found" rather than anything about the app.
-# Its own layer, before the lockfile is copied, so that adding an app does not
-# also reinstall git.
+#
+# git gets a layer of its own, before the lockfile is copied, so that adding an
+# app rebuilds the dependency layers and not this one.
 #
 # Note that removing it later in a single-stage build would not have helped:
 # the layer above still carries the files, and the deletion only adds another
