@@ -1,0 +1,593 @@
+# Briefing: a contacts app, and a bulletin board
+
+For sessions that will build two new podpack apps:
+
+1. **Contacts** — public-facing enquiries, with the resulting **email threads**
+   trackable from inside the app.
+2. **A bulletin board** — either written as a podpack app, or an existing
+   open-source forum integrated into the estate.
+
+**This is a briefing, not a plan.** It records what the estate already is, what
+it already forbids, and what it does not have. It proposes no schema, no
+routes and no design. Those are for the sessions that follow, and for Steve to
+approve before anything structural is built.
+
+**Written 2026-09-29, revised to 2026-10-14**, against podpack `0.9.5+dev`,
+holdenweb.com `1.8.5+dev`, staging running `6939fb5`. Version-sensitive claims
+carry their own date; treat this as a document, not a test result, if you are
+reading it against something newer.
+
+It lives in podpack because that is where app-authoring guidance lives, but it
+spans the estate: links beginning `../holdenweb.com/` resolve only in a
+`~/sites` layout holding both repositories, and will be dead for anyone who has
+cloned podpack alone.
+
+---
+
+## How this was established, and how much to trust it
+
+Most of it was verified by running something, on this machine, on 2026-09-29.
+Where a claim was *not* driven, it says so.
+
+Two warnings about method, because they invalidate the obvious way to check
+this document:
+
+**`grep` inside a Claude session is not `/usr/bin/grep`.** This is about the
+tool, not the machine: Steve's own terminal has `/usr/bin/grep` and is
+unaffected — `zsh -l -i -c 'type grep'` confirms it. But Claude Code's Bash
+tool runs in a shell whose snapshot defines `grep` as a function routing to its
+own bundled **ugrep** with `--ignore-files`, which honours `.gitignore`. It
+shims `find` → **bfs** and `rg` the same way. Nothing in `~/.zshrc` does this;
+the definitions live in `~/.claude/shell-snapshots/`.
+
+The effect is not marginal. In `holdenweb.com`:
+
+```
+/usr/bin/grep -rl smtplib .   ->  15 files
+grep -rl smtplib .            ->   5 files
+```
+
+The ten it drops include `scratch/mailtest.py` — a working standalone SMTP
+client, and evidence that directly contradicts "nothing but flask-security
+sends mail" — plus `.venv/`, `hostdata/`, `hostlogs/` and both `*.wpu`.
+
+**So: `/usr/bin/grep`, or `grep --no-ignore-files`, before concluding anything
+is absent.** Several absence claims in the research behind this document were
+wrong for exactly this reason and were caught by an adversarial pass. Assume it
+missed some.
+
+**A search that finds nothing has two explanations.** Steve's standing rule,
+and it earned its place here: the first sweep of this estate reported "no
+contact mechanism on holdenweb.com" while `mailto:info@holdenweb.com` sits in
+the footer of every page the site serves
+([templates/base.html:81](../holdenweb.com/src/holdenweb/templates/base.html)).
+
+---
+
+## Read these first — they are better than this document
+
+| | |
+| --- | --- |
+| [writing-an-app.md](writing-an-app.md) | 1,396 lines. The contract, a worked example, testing, shipping, and a `When it goes wrong` catalogue. **Read it end to end before writing a line.** |
+| [README.md](README.md) | 1,558 lines. The reference: migrations, substrate, services, deployment. |
+| [claude.md](claude.md) | Where the project is up to. §4 `Gotchas already paid for` is sixteen numbered traps; do not rediscover them. |
+| [adrs/README.md](adrs/README.md) | 39 records, ADR-0001…0039. Records are immutable — supersede, never edit. |
+| [holdenweb.com/adrs/README.md](../holdenweb.com/adrs/README.md) | 34 records, HW-0001…HW-0034. A bare `ADR-nnnn` always means podpack's. **The files are named `nnnn-slug.md` but titled `HW-nnnn` inside**, so grepping for a filename `HW-0009-…` finds nothing. |
+| [holdenweb.com/ops/MESSAGES.md](../holdenweb.com/ops/MESSAGES.md) | 121 real error messages with what each means and what to do. Generated — edit `messages.json`, never the views. |
+
+`tests/fixture_app/` is a complete canonical app in miniature, and
+`podpack-notes` is the deliberate worked example: a model, a template, shipped
+data, per-app config, an `init` and a nav entry.
+
+---
+
+## The estate, in twenty lines
+
+Eight git repositories under `~/sites`, each published independently to PyPI by
+trusted publishing on an `r*` tag.
+
+| Repository | Version | What it is |
+| --- | --- | --- |
+| `podpack` | 0.9.5+dev | the framework |
+| `podpack-pages` | 0.3.4 | ships **three** apps: `pages`, `pybooks`, `blog` |
+| `podpack-notes` | 0.1.4+dev | the worked example |
+| `podpack-notebooks` | 0.1.2+dev | static Jupyter notebooks |
+| `podpack-pdf` | 0.2.2 | booklet maker — **the upload precedent** |
+| `podpack-qrcode` | 0.2.2 | QR codes |
+| `podpack-demo` | 0.2.0 | the site `creating-a-site.md` builds |
+| `holdenweb.com` | 1.8.5+dev | the only deployed site |
+
+One site runs in production: **staging**, at `https://os.holdenweb.com`, on
+Opalstack host `opal17`. `holdenweb.com` the domain still points at unrelated
+older technology. A site is one instance serving one site (ADR-0001) — there is
+no multi-domain serving and no host-based routing.
+
+---
+
+## Nine things that are true, surprising, and will change your design
+
+Each of these was verified by running it. Each one has bitten, or is waiting to.
+
+### 1. The framework ships no mail. The *site* wires it.
+
+podpack declares no mail library at all. `holdenweb.com` brings
+`flask-mailman 1.1.1`, creates `Mail()` unbound at module level and binds it in
+its own `_wire`, which podpack calls as `init` **before any app is installed**
+([src/holdenweb/\_\_init\_\_.py:37,103](../holdenweb.com/src/holdenweb/__init__.py)).
+ADR-0025 settles that this is the site's job, not the framework's.
+
+The consequence for an app: `writing-an-app.md:703-710` is explicit — *"There is
+no mechanism for 'this app requires mail', so check for it and degrade, or say
+so in your README."* You can declare `needs_secrets`, `needs_tables`,
+`defines_tables` and `backs_up`, and podpack refuses to boot a site that cannot
+satisfy them (ADR-0034). You **cannot** declare that you need mail.
+
+Reach it as `current_app.extensions["mailman"]`.
+
+### 2. Sending is synchronous, inside the request, with two workers.
+
+`smtp.gmail.com:465` over SSL as `steve@holdenweb.com`, `MAIL_PASSWORD` a Gmail
+App Password declared in `config/app.toml`'s `secrets` list and delivered from
+`secrets.env`. flask-mailman's SMTP backend re-raises `SMTPException`
+(`fail_silently` defaults False), and flask-security catches nothing its mail
+backend raises — which is why the site supplies `ReportingMailUtil`
+([src/holdenweb/mail_util.py](../holdenweb.com/src/holdenweb/mail_util.py)), after
+an expired credential turned "reset my password" into a 500.
+
+`GUNICORN_WORKERS` defaults to 2. Two enquiries submitted while Gmail is slow
+and the site has no worker left for anybody. There is no queue, no broker and
+no retry anywhere in the estate.
+
+### 3. There is no inbound path of any kind.
+
+No IMAP or POP client, no SMTP listener, no Maildir or mbox reader, no mail
+webhook, no broker, no worker, no Celery/RQ/APScheduler/Redis — in either
+lockfile, in any repo. Nothing in the estate has ever read a message.
+
+The only scheduler is **host cron on opal17** (`ops/backup.cron`, a checked-in
+crontab), plus **UptimeRobot** polling `/healthz` from outside. Both are
+recorded; neither is in a container.
+
+`scripts/` and `ops/` are not in the image, so anything needing application
+context must be a Flask CLI command run as
+`podman compose exec -T web`. An in-process polling thread would multiply by
+the worker count and fetch everything twice — which is precisely why the
+one-shot `migrate` service exists.
+
+### 4. You cannot capture a `Message-ID` after sending. Mint it yourself.
+
+Decisive for threading. flask-mailman generates it *inside* `message()`, at
+send time, only when the header is absent
+(`flask_mailman/message.py:269-271`), from `socket.getfqdn()` — which inside
+the container is podman's ephemeral hostname, not a domain the site owns. And
+`send()` returns a **count**, not the message (`message.py:284-291`).
+
+So: set `Message-ID` (and `In-Reply-To` / `References`) yourself in
+`extra_headers`, under a domain you control, and store it in the same
+transaction as the record it belongs to. Nothing in the estate does this today,
+because flask-security is the only sender.
+
+### 5. The mail DNS already authorises the deploy host to send as the site.
+
+Confirmed on **2026-10-12** against the authoritative nameservers
+(`ns10.dnsmadeeasy.com`), not just a local resolver:
+
+| | MX | SPF | DMARC |
+| --- | --- | --- | --- |
+| `holdenweb.com` | Google (`aspmx.l.google.com` + alt1/alt2) | `v=spf1 include:_spf.google.com include:_spf.opalstack.com ~all` | `v=DMARC1; p=none; rua=mailto:steve@holdenweb.com;` |
+| `os.holdenweb.com` | Opalstack (`mx1/mx2.de.opalstack.com`) | `v=spf1 include:spf.opalstack.com ~all` | `v=DMARC1; p=none` |
+
+Three things follow, and the first is the useful one.
+
+**`holdenweb.com`'s SPF already includes `_spf.opalstack.com`.** Mail sent from
+the Opalstack host as `@holdenweb.com` passes SPF today — so the sending
+identity an app would want is already authorised, without a DNS change. That is
+a deliberate arrangement, not an accident of hosting.
+
+**DMARC is `p=none` with aggregate reports to `steve@holdenweb.com`**, so
+nothing is being rejected on alignment yet, and there is a feedback channel if
+volume changes. There is no DKIM record at Google's default `google._domainkey`
+selector, so alignment currently rests on SPF alone. (A selector can be named
+anything; absence at the default one is not proof of no DKIM.)
+
+**It is Google Workspace, not consumer Gmail** — confirmed by Steve,
+2026-10-12. Note that **HW-0030** ("the site sends as a person")
+says *consumer* throughout and reasons from it, including its rejection of SES,
+Postmark and Mailgun on scale grounds. **That premise is wrong, so the costs
+that record weighs are wrong.** Records are immutable; this wants a superseding
+HW record, which did not exist when this was written. Do not take HW-0030's
+mail economics at face value. (Not to be confused with podpack's **ADR-0030**,
+which is about apps reporting health — an unrelated record, and exactly why the
+bare-number convention above matters.)
+
+What Workspace makes available that consumer Gmail does not, and that bears
+directly on App 1 — all of it subject to edition and admin settings, so confirm
+in the console before designing on it:
+
+- **Sub-addressing.** `enquiries+<token>@holdenweb.com` delivers to
+  `enquiries@`, so a token in `Reply-To:` makes a reply self-identifying
+  without matching `In-Reply-To`/`References` — which clients mangle or strip.
+- **The Gmail API**, either polled from a CLI command on the existing cron
+  line, or `users.watch` → Pub/Sub for genuine push. The second reintroduces a
+  public POST endpoint on the serving host, which runs against what HW-0002,
+  HW-0008 and HW-0009 record about ingestion there.
+- **A service account with domain-wide delegation** scoped to one mailbox,
+  instead of the long-lived Gmail App Password the site uses now.
+- **`smtp-relay.gmail.com`**, which permits sending as any address in the
+  domain. Today the envelope sender is forced to the authenticated user, which
+  is why everything leaves as `steve@holdenweb.com`.
+- **Groups as shared inboxes**, with an archive independent of any app.
+
+And note that `os.holdenweb.com` has its own Opalstack MX — **the deployment's
+hostname can already receive mail.** That is the cheapest candidate inbound
+path in the estate and nobody has written it down. A candidate, not a decision.
+
+*Earlier draft of this document said both records were missing on
+`holdenweb.com`. That was checked on 2026-09-29 and was true then as far as two
+independent checks could tell; it is false now. Re-run the lookups rather than
+trusting either reading.*
+
+### 6. `SESSION_COOKIE_SAMESITE` is not set on the live site, though the code says it is.
+
+Booted `holdenweb.create_app()` and read the config:
+
+```
+SESSION_COOKIE_SAMESITE    None        <- line 84 says 'strict'
+SESSION_COOKIE_SECURE      False
+REMEMBER_COOKIE_SAMESITE   'strict'    <- line 83 took
+MAX_CONTENT_LENGTH         20971520
+MAX_FORM_MEMORY_SIZE       500000
+```
+
+`_wire` is written entirely in `setdefault`, and **Flask ships
+`SESSION_COOKIE_SAMESITE` in its own defaults with value `None`** — so
+`setdefault` is a no-op. `REMEMBER_COOKIE_SAMESITE` is not a Flask key, so the
+line above it works. Two adjacent lines, one effective and one dead.
+
+Every Flask default is exposed to the same trap: `SESSION_COOKIE_SECURE`,
+`MAX_CONTENT_LENGTH`, `MAX_FORM_MEMORY_SIZE`, `MAX_FORM_PARTS`,
+`PREFERRED_URL_SCHEME`. **Check any config you set by reading it back off a
+booted app, not by reading the source.**
+
+`MAX_FORM_MEMORY_SIZE` is 500 kB and caps form *fields* independently of
+`max_upload_bytes`. A long enquiry or a pasted forum post meets that limit
+first.
+
+### 7. There is no CSRF protection for a form you write yourself.
+
+Booted app: `app.extensions` is `['podpack', 'sqlalchemy', 'mailman',
+'security']`. No `csrf`. flask-security's own forms carry a token because they
+are `FlaskForm`s; a hand-written `<form>` posting to your view has nothing.
+
+And **an app cannot fix this**. flask-security requires `CSRFProtect` to be
+initialised *before* it
+(`flask_security/core.py:1902-1905`), and podpack's order is
+`init(app)` → `auth.install` → `install_apps`. Your `SiteApp.init` runs after
+flask-security, which is the order flask-security forbids. Site-wide CSRF is
+installable only from the **site's** `_wire`.
+
+Use `FlaskForm` for anything that takes a POST, or raise the question with
+Steve.
+
+### 8. Sessions are bound to IP and User-Agent, and break silently.
+
+`holdenweb.com` wires **flask-paranoid**, an unconditional site-wide
+`before_request` (confirmed present on the booted app). It hashes
+`X-Forwarded-For[0] + "|" + User-Agent`, and when the stored token differs it
+**clears the session and 302s to `/`** — with no flash and no message.
+
+So a visitor on mobile data, a VPN, carrier NAT — or whose browser auto-updates
+its User-Agent mid-session — loses a half-written enquiry or forum post and
+lands on the front page with no explanation. It clears the remember-me cookie
+too (`paranoid.py:99-111`), so the effect is a full logout, not just a reset
+session. It writes `_paranoid_token` on the **first** request of any session, so
+every anonymous visitor is given a cookie before interacting with anything. And
+it is registered on the app, so **no app can opt out, exempt a route, or catch
+it**.
+
+**But the site is not relying on it alone, which is the part that decides what
+to do about it.** flask-login's own session protection is already active at
+`basic` — verified on the booted app: `SESSION_PROTECTION` is unset in config
+and `login_manager.session_protection` is `'basic'`. It computes
+`sha512(X-Forwarded-For[0] | User-Agent)`, the same two inputs by the same
+client-trusting rule as paranoid's `sha256`
+(`flask_login/utils.py:383-401`). Two differences matter:
+
+- **It does not evict.** `basic` sets `_fresh = False` and continues, so a
+  session that moves is merely untrusted for `fresh_login_required` views
+  rather than destroyed. `SESSION_PROTECTION = 'strong'` restores eviction if
+  wanted.
+- **It skips empty sessions** (`if sess and ident != sess.get("_id")`), so
+  anonymous visitors are untouched — which is exactly the population filling in
+  a public contact form.
+
+So `X-Forwarded-For` is read by **three** things here, not two: paranoid,
+flask-login, and podpack's own centralised hop count. Dropping paranoid removes
+a duplicate, not the trust question.
+
+Any multi-step flow, any long form, any "come back and finish later" is wrong
+on this site while paranoid is wired. What is *not* true is that removing it
+would leave sessions unprotected.
+
+### 9. There is exactly one role, and the nav shows everything to everybody.
+
+`admin`, and nothing else — no moderator, editor, author or member exists in
+code, config, migration or ADR. `Section` is a frozen `(label, endpoint)` pair
+with no visibility predicate, and the context processor puts every entry in
+front of every template. A "Start a topic" nav entry renders for anonymous
+visitors; conditional chrome is the **site's**, not the app's.
+
+Public sign-up **is** on, gated by email confirmation
+([\_\_init\_\_.py:80-82](../holdenweb.com/src/holdenweb/__init__.py)) — so a
+stranger can already get a confirmed account. A confirmed non-admin reaches
+nothing an anonymous visitor does not, bar its own name in the nav.
+
+---
+
+## App 1 — contacts, and tracking email threads
+
+Everything above applies. Three things are specific.
+
+**The hard constraint: there is nowhere to put work that is not a request, and
+the one place that exists cannot build a URL.**
+
+Tracking a thread means correlating something that arrives later. Every
+mechanism for that is missing (§3). The one supported shape is a Flask CLI
+command on a host cron line — and on this site that command **cannot build an
+absolute link to put in an email**. `holdenweb.com` sets no `[site] base_url`,
+so `podpack.absolute_url()` falls through to `url_for(_external=True)`, which
+raises outside a request context
+(`podpack/src/podpack/urls.py:43-61`). `podpack-demo` sets `base_url`;
+holdenweb.com deliberately does not, and `operations.md:761-765` records why.
+
+**Settle that fork before drawing any schema.** It is one line of config and a
+decision with recorded history.
+
+**What protects a public POST today: nothing.** No rate limiting, no CAPTCHA,
+no honeypot, no anti-spam of any kind, and no HTML sanitisation library
+(`bleach`, `nh3`) anywhere. The estate's only sanitisation of a user-supplied
+string is `secure_filename()` in podpack-pdf. Jinja autoescapes, which covers
+display; it does not cover storing, mailing on, or rendering anywhere else.
+
+**Where public mail lands — decided by Steve, 2026-10-12.**
+`info@holdenweb.com` is advertised in the footer of every page
+([templates/base.html:81](../holdenweb.com/src/holdenweb/templates/base.html)) and
+is a *different address* from the one the site authenticates and sends as.
+It is to be a **Google Group**, and whoever holds podpack's `admin` role is
+also to be a member of that group. So the site's administrator and the public
+contact point are deliberately the same person, by membership rather than by
+the address being an alias.
+
+**That decision constrains how an app can read it, and the constraint is not
+obvious.** A Google Group is not a Gmail mailbox: `users.messages.list` and
+`users.watch` operate on user mailboxes, so **the Gmail API cannot poll a
+Group.** A Group's own archive is reachable only through different APIs. Three
+ways out, and the choice belongs with the design:
+
+- Give the app its **own user mailbox** — `enquiries@`, say — delegated to a
+  service account, and make that mailbox a member of the `info@` Group. The
+  app reads only its own mailbox; humans keep the Group. This is the one that
+  keeps the app's access scoped.
+- Poll the **admin member's** mailbox. Cheapest, and wrong: the app would hold
+  delegation over a person's personal mail to find the fraction addressed to
+  the site.
+- Keep `info@` for humans and give the app a **separate advertised address**
+  entirely, with the `+token` threading on that one.
+
+Confirm the Group/mailbox distinction against the Workspace console before
+building on it — it is stated here from platform behaviour, not from anything
+verified in this estate.
+
+---
+
+## App 2 — a bulletin board
+
+**The decision is build-or-integrate, and the estate settles it harder than
+the schema does.**
+
+### If it is written as a podpack app
+
+It is an ordinary app and the constraints are the ordinary ones — plus these,
+which a board meets immediately and the estate has no precedent for:
+
+- **No pagination exists anywhere.** `podpack-notes`' `page_size` is a bare
+  `.limit()` with no offset, no count and no page links. A thread list is built
+  from zero.
+- **No app ships CSS or JS.** No app in the estate has a `static/` directory;
+  no blueprint passes `static_folder`; the one stylesheet in any app is inlined
+  into a `<style>` tag. `holdenweb.com/templates/base.html:8-11` states the
+  arrangement outright: *the site styles the apps.*
+- **And the styling block you would reach for does not exist on the real
+  site.** podpack's default chrome defines `title`, `styles`, `content`;
+  holdenweb.com's defines a dozen blocks but **no `styles`**. A block the
+  chrome does not define is discarded silently (`writing-an-app.md:481-491`).
+  So an app styled through `{% block styles %}` renders perfectly in a dev site
+  and **arrives unstyled on the deployed one**. Nobody has decided whether a
+  board ships its own assets or grows `holdenweb.com/static/styles.css`.
+- **Moderation needs roles that do not exist** (§9).
+- Prefix `__tablename__` with your app's name — `db.metadata` is flat and
+  shared, and a clash breaks the *site*, not either app (rule 10).
+
+### If an existing forum is integrated
+
+Three independent walls converge, and none can be moved from inside an app.
+
+**Schema.** One alembic history per site (ADR-0009), metadata assembled from
+the config's app list, and `alembic/env.py` sets no `include_object`. A forum's
+own tables sit in the same database declared by nothing — and the next
+`alembic revision --autogenerate` faithfully writes `op.drop_table()` for every
+one of them. The two exits are a separate database, or hand-maintained
+revisions plus an `include_object` hook — and `alembic/env.py` is a
+**substrate-managed** file, so editing it puts the site in three-way conflict
+on every `podpack substrate upgrade` for as long as it lives.
+
+**Services.** The core-services catalogue is closed to `postgres` and
+`mongodb`, an app may not declare that it needs a backing service (ADR-0028),
+and `podpack substrate services --add` rewrites the whole `COMPOSE_FILE` line
+from that catalogue — silently deleting a hand-added overlay. Discourse wants
+Redis and Sidekiq; NodeBB wants Redis or Mongo; Flarum wants PHP. None of that
+arrives through the framework, and none of it is backed up: `backup.sh`
+archives only what `podpack backup plan` reports from the closed catalogue.
+
+**Address space.** The public edge is rented. HW-0031 is explicit: the site
+owns no route, no vhost and no path prefix, and two deployments on one host
+must be allocated different ports by hand from Opalstack's panel. No compose
+file in the estate declares `networks`, `network_mode` or `extra_hosts`, so a
+second stack cannot resolve `web` or `postgres` by name.
+
+**So an integrated forum is a second Opalstack application on a second
+hostname, not `/forum` on the existing site** — which means a second cookie
+domain, and with flask-security and flask-paranoid both living on the first,
+no shared login without SSO that does not exist. There is no OAuth, OIDC,
+WebAuthn or magic link configured anywhere (the flask-security machinery for
+some of it is installed and switched off).
+
+The estate offers no middle path: **inherit identity, chrome, backup and deploy
+by writing the board as an app, or run a separate product on a separate
+hostname with a separate account system.**
+
+---
+
+## Traps that will cost you an afternoon
+
+- **A git-sourced dependency will not build.** `git` is commented out of
+  `holdenweb.com/Containerfile`'s builder stage, with the measurement that
+  removed it (103.6 MB) and the condition for putting it back. `uv` shells out
+  to a real `git` for any git-locked dependency, and the failure says *"Git
+  executable not found"* — naming neither the file nor the dependency. **Publish
+  to PyPI first**, or restore the layer deliberately.
+- **Migrations are authored on the host, never in the container** (ADR-0011,
+  gotcha 16), and there is one history per site. An app ships no migrations;
+  every site regenerates your schema in its own history.
+- **A table exists to alembic only if defining it is an import side effect of
+  your `models.py`** (ADR-0010). A model in a module nothing imports is
+  invisible to autogenerate.
+- **`restart` is not a rebuild.** Source is baked into the image; use
+  `./scripts/up.sh`, which always rebuilds and stamps the commit (gotcha 15).
+  Only mounted config is a restart-only change.
+- **Shipped `data/` seeds once, ever** (ADR-0008), and there is no once-only
+  code hook — `SiteApp.init` runs every boot. App *upgrade* is deliberately
+  deferred, and the trigger Steve named for solving it is precisely *an app
+  that ships data expected to change with its code*.
+- **You cannot declare a podpack version floor.** It remains prose and hope
+  (`writing-an-app.md:1364+`).
+- **`413` is uncatchable by an app**, and a `@blueprint.errorhandler(404)`
+  covers only a 404 your own views raise — an unmatched URL under your prefix
+  belongs to no blueprint and falls to the site.
+- **Timezones have no convention.** One model in the estate does it right —
+  `db.DateTime(timezone=True)` with `default=lambda: datetime.now(timezone.utc)`
+  in podpack-notes. Copy it deliberately.
+- **Don't name podpack in `[project.dependencies]`** — a dependency group
+  instead. A real dependency's `[tool.uv.sources]` travels with the
+  distribution and breaks any site that resolves it. This is measured, in
+  `writing-an-app.md:98-208`.
+
+---
+
+## How to check any of this yourself
+
+```bash
+cd /Users/sholden/sites/holdenweb.com && SECRET_KEY=test-secret-key SECURITY_PASSWORD_SALT=test-salt MAIL_PASSWORD=test-mail-pw SQLALCHEMY_DATABASE_URI=sqlite:// PODPACK_ENVIRONMENT=local uv run python -c "import holdenweb; app = holdenweb.create_app(config_path='config/app.toml', data_root='/tmp/d', log_root='/tmp/l'); print(app.config['SESSION_COOKIE_SAMESITE'], list(app.extensions))"
+```
+
+That boots the real site with test secrets and prints its effective config —
+the only reliable way to settle "is this setting actually set?".
+
+And when searching for something you expect to be absent, defeat the tool's
+gitignore-honouring shim:
+
+```bash
+/usr/bin/grep -r 'pattern' /Users/sholden/sites
+```
+
+---
+
+## What I could not settle — for Steve, not for you to guess
+
+1. **Whether `holdenweb.com` should set `base_url`.** It decides whether any
+   scheduled work can put a link in an email (§App 1).
+2. **Whether a board ships its own CSS** or grows the site's stylesheet — the
+   first has no precedent and no working template block, the second makes the
+   app undeployable anywhere else.
+3. **Whether `SESSION_COOKIE_SAMESITE` and `SESSION_COOKIE_SECURE` should be
+   set for real.** They are dead code today (§6). This is a live defect,
+   independent of either new app.
+4. **Whether flask-paranoid stays.** Its behaviour (§8) is incompatible with
+   any long public form, and it is recorded nowhere as a deliberate trade.
+   Analysed 2026-10-14: dropping it costs less than it appears, because
+   flask-login's `basic` protection already runs on the same signal without
+   evicting. What it would cost is hard eviction of a moved session; what
+   compensates, and wants doing either way, is actually setting
+   `SESSION_COOKIE_SECURE` and `SESSION_COOKIE_SAMESITE` (dead today, §6) and
+   shortening the 31-day `PERMANENT_SESSION_LIFETIME`. Those protect the cookie
+   from being captured, which an IP check does not.
+5. **Whether mail handling belongs in podpack rather than in each site.**
+   Raised by Steve, 2026-10-12. See the recommendation below.
+6. **Whether podpack gains a `requires_apps` declaration**, so an app can
+   state that another app must be *enabled*. See below.
+
+### Recommended: sending built in, receiving as an app
+
+This is a recommendation awaiting Steve's decision, not a settled design. It is
+here because the alternative — one mail app doing both halves — looks tidier
+and does not survive contact with podpack's install order.
+
+**Build *sending* into the framework as a service**, in ADR-0028's sense: a
+thing a site enables, wired before any app. **Make *receiving and threads* an
+app**, which they plainly are — models, storage, a polling command, a UI.
+
+That split is forced by one verified fact. The order is `init(app)` →
+`auth.install` → `install_apps`
+([podpack/\_\_init\_\_.py:165-172](src/podpack/__init__.py)).
+flask-security needs its `MailUtil` at *its own* init, which is before any app
+exists — so a mail *app* could never serve core's password-reset mail. Worse, it
+would make core depend on an app, inverting the layering ADR-0033 had just
+established. A *service* sits at the right altitude and both problems vanish.
+
+How to design around the rest:
+
+- **Keep the deployment's settings where the deployment's settings live.**
+  Server, port, sender and relay are not an app's to default: ADR-0018, 0036
+  and 0039 are one long argument that they follow the deployment. Non-secret
+  keys in the site's own config, the credential through `needs_secrets`. And
+  heed ADR-0039's lesson — a new variable delivered in a *seeded* file never
+  reaches an existing site, which is exactly how `PODPACK_PROXY_HOPS` was
+  missed.
+- **Leave failure policy with the site.** `PODPACK_MAIL_UTIL_CLS` already
+  exists for this, and `mail_util.py`'s own docstring makes the case: what
+  happens when a message cannot be sent is the site's business. A service
+  supplies transport, not policy.
+- **Keep the two kinds of mail apart.** flask-security's transactional mail and
+  an app's correspondence are different concerns. The receiving app owns
+  threads and reply tokens and should never touch flask-security's templates.
+- **Then the declaration gap closes properly.** `writing-an-app.md:703-710`
+  wants an app to be able to say it needs mail. With sending as a service that
+  is a *service* dependency, not an app one — which keeps `requires_apps` for
+  genuine app-to-app edges and stops the two ideas contaminating each other.
+
+### Settled: podpack does not do package management
+
+Steve, 2026-10-12, and recorded so it is not reproposed. The objection that
+`requires_apps` carries no version is **answered by the layer below it**: uv and
+PyPI already enforce versioned dependencies, which is what a package manager is
+for. An app that requires another app expresses the *version* constraint as an
+ordinary dependency and the *enablement* constraint through podpack — and those
+are genuinely different facts, since ADR-0004's whole point is that installed
+is not enabled.
+
+So `requires_apps` would assert enablement only: **refuse at boot, never
+resolve, never install.** podpack is to stay free of version floors, transitive
+resolution and ordering solvers in the name of simplicity. Steve also notes the
+estate is simple enough to be a monorepo, and arguably should be, which would
+change this calculus — it is not one today.
+
+**Nothing here is to be built yet.** His words: *leave things as they are for
+now.*
+
+---
+
+*Prepared by Claude, 2026-09-29 and revised through 2026-10-14, from a 17-agent
+survey of the estate with an
+adversarial pass over every absence claim, and re-verified by hand where it
+mattered. The adversarial pass corrected roughly a dozen findings; assume it
+missed some.*
