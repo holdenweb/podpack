@@ -522,48 +522,77 @@ gitignore-honouring shim:
    shortening the 31-day `PERMANENT_SESSION_LIFETIME`. Those protect the cookie
    from being captured, which an IP check does not.
 5. **Whether mail handling belongs in podpack rather than in each site.**
-   Raised by Steve, 2026-10-12. See the recommendation below.
+   Raised by Steve, 2026-10-12. The recommendation below was reversed on
+   2026-10-14 after both premises behind it were falsified: both halves are now
+   recommended as apps, with one condition.
 6. **Whether podpack gains a `requires_apps` declaration**, so an app can
    state that another app must be *enabled*. See below.
 
-### Recommended: sending built in, receiving as an app
+### Recommended: both halves are apps, and optionality must fail loudly
 
-This is a recommendation awaiting Steve's decision, not a settled design. It is
-here because the alternative — one mail app doing both halves — looks tidier
-and does not survive contact with podpack's install order.
+A recommendation awaiting Steve's decision, not a settled design.
 
-**Build *sending* into the framework as a service**, in ADR-0028's sense: a
-thing a site enables, wired before any app. **Make *receiving and threads* an
-app**, which they plainly are — models, storage, a polling command, a UI.
+**Sending and receiving are both apps.** One distribution can ship the pair
+(ADR-0038), which keeps the `Message-ID` a send mints in the same codebase as
+the receive that matches on it. A site that sends no mail installs nothing.
 
-That split is forced by one verified fact. The order is `init(app)` →
-`auth.install` → `install_apps`
-([podpack/\_\_init\_\_.py:165-172](src/podpack/__init__.py)).
-flask-security needs its `MailUtil` at *its own* init, which is before any app
-exists — so a mail *app* could never serve core's password-reset mail. Worse, it
-would make core depend on an app, inverting the layering ADR-0033 had just
-established. A *service* sits at the right altitude and both problems vanish.
+**This reverses the recommendation recorded here on 2026-10-12**, which was
+sending built into the framework as a service. Both premises it rested on were
+checked on 2026-10-14 and both were wrong — worth stating, because they are the
+objections anyone will raise again:
 
-How to design around the rest:
+- *"flask-security needs its `MailUtil` before apps install, so an app cannot
+  serve core's password-reset mail."* False.
+  `flask_security/mail_util.py:51-56` — `MailUtil.__init__` is `pass`, and
+  `send_mail` resolves the transport per-send with
+  `current_app.extensions.get("mailman")`, inside a request. Only the *class*
+  need exist at `auth.install`, and a class is an import. The install order
+  (`init(app)` → `auth.install` → `install_apps`,
+  [src/podpack/__init__.py](src/podpack/__init__.py):165-172) does not bite.
+- *"Sending is a service in ADR-0028's sense."* A category error.
+  `src/podpack/services/__init__.py:1` defines a service as *"the backing
+  stores a site can choose to run"* — a compose overlay with a container. Mail
+  is an outbound client with nothing to run, so routing it there would have
+  meant inventing a second meaning of "service".
 
-- **Keep the deployment's settings where the deployment's settings live.**
-  Server, port, sender and relay are not an app's to default: ADR-0018, 0036
-  and 0039 are one long argument that they follow the deployment. Non-secret
-  keys in the site's own config, the credential through `needs_secrets`. And
-  heed ADR-0039's lesson — a new variable delivered in a *seeded* file never
-  reaches an existing site, which is exactly how `PODPACK_PROXY_HOPS` was
-  missed.
-- **Leave failure policy with the site.** `PODPACK_MAIL_UTIL_CLS` already
-  exists for this, and `mail_util.py`'s own docstring makes the case: what
-  happens when a message cannot be sent is the site's business. A service
-  supplies transport, not policy.
-- **Keep the two kinds of mail apart.** flask-security's transactional mail and
-  an app's correspondence are different concerns. The receiving app owns
-  threads and reply tokens and should never touch flask-security's templates.
-- **Then the declaration gap closes properly.** `writing-an-app.md:703-710`
-  wants an app to be able to say it needs mail. With sending as a service that
-  is a *service* dependency, not an app one — which keeps `requires_apps` for
-  genuine app-to-app edges and stops the two ideas contaminating each other.
+What app-shaped sending buys:
+
+- **It fixes a defect already on the record.** HW-0030 says the mail settings
+  can be overridden from the environment. They cannot — tested 2026-10-14,
+  `MAIL_SERVER` and `MAIL_PORT` set in the environment left `app.config` at
+  `smtp.gmail.com:465`, because `_wire` reads `os.environ` for `MAIL_PASSWORD`
+  alone. As `[apps.mail]` config it becomes reviewable and genuinely
+  overridable.
+- **`needs_secrets={"MAIL_PASSWORD"}`** gives the boot-time check per app
+  rather than per site.
+- **`status()` and `healthz()`** (ADR-0030) give `/_status` a mail report and a
+  non-fatal health line. That is why `flask --app holdenweb mail check` exists
+  as a bespoke command today: there was nowhere idiomatic to put it.
+- **One implementation** instead of ~20 lines of `_wire` in every site — the
+  ADR-0033 argument, one layer down.
+
+The two real costs:
+
+- **An app with no routes bends the contract.** ADR-0025's reason mail was not
+  an app is that it "registers no blueprint", and a sending app still registers
+  none; it would carry a blueprint only to own its name (ADR-0003). Legal, but
+  odd.
+- **Silent degradation, and it is worse than today.** `send_mail`'s lookup is
+  `if current_app.extensions.get("mailman", None):` with **no else branch**. A
+  site with `SECURITY_CONFIRMABLE` on and no mail app enabled would accept
+  registrations and send nothing at all — no error, no log. Today
+  `MAIL_PASSWORD` in `secrets` makes that a boot failure. **So optionality
+  requires a boot-time check that a site whose config implies mail has it.**
+  Note that check is neither `needs_secrets` nor `requires_apps`: it is
+  *site-config → app*, a third relation, and it is the part to decide
+  deliberately rather than discover.
+
+Unchanged from the earlier recommendation: deployment settings follow the
+deployment (ADR-0018/0036/0039, including 0039's lesson that a variable shipped
+in a *seeded* file never reaches an existing site); failure policy stays the
+site's through `PODPACK_MAIL_UTIL_CLS`, which podpack reads as a class object at
+`auth.install` and an app therefore cannot set — the app ships the class, the
+site names it; and transactional mail stays apart from correspondence.
 
 ### Settled: podpack does not do package management
 
