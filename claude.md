@@ -405,17 +405,20 @@ versions. It now installs seven apps from five distributions, `holdenweb`
 itself plus `podpack-pages` three times over (ADR-0038), `podpack-notebooks`,
 `podpack-qrcode` and `podpack-pdf`.
 
-### Guardrails still outstanding from the original brief
+### Settled: the guardrails from the original brief
 
-- **The largest part of the adaptation is configuration.** holdenweb.com reads
-  *everything* from the environment; podpack expects non-secret settings in a
-  host-mounted TOML and secrets in the environment.
-- **`HTTPContentSource` should be mothballed** until there is a specific need —
-  Steve chose deletion. **But `/asset/` and `rewrite_asset_urls` must stay.**
-  They are not HTTP-specific, and `data/html-pages/writing/images/` holds 12
-  images that three pages reference relatively; deleting the route 404s them.
-- **Is content core or a plugin?** Still open. Easier to answer once `podpack-pdf` is
-  installed alongside another app and there are two to compare.
+All three were open when the brief was written; none is now (checked
+2026-10-28).
+
+- **Configuration was the largest part of the adaptation.** holdenweb.com read
+  *everything* from the environment; it now takes non-secret settings from
+  `config/app.toml`, mounted at `PODPACK_CONFIG`, and only secrets from the
+  environment.
+- **`HTTPContentSource` was mothballed by deletion**, as Steve chose, and is in
+  no source file. The `/asset/` route and the relative-URL rewriting that had to
+  survive it live on in `podpack-pages` (`rewrite_relative_urls` since 0.3.4),
+  where content went.
+- **Content is a plugin.** It moved out to `podpack-pages`, as above.
 
 ### Settled: uwsgi goes, and the `deploy` utility with it
 
