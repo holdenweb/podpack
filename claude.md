@@ -33,11 +33,16 @@ by hostname. Do not add `SERVER_NAME` handling or a site registry.
 
 | Directory | What it is | State |
 | --- | --- | --- |
-| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | 128 commits, working |
-| `~/sites/podpack-notes` | the notes app, in its own repository | pushed; installed by the demo site |
-| `~/sites/podpack-demo` | a site, and the worked output of following `creating-a-site.md` | installs podpack + podpack-notes from git |
-| `~/sites/pp-pdf` | the PDF tools as a standalone installable package | 20 commits; **reconciled** — installs as a podpack app and still works as a plain blueprint (§5) |
-| `~/sites/holdenweb.com` | the original Flask site | untouched; **not yet adapted** — see §6 |
+| `~/sites/podpack` | **this repo** — the framework, plus the container substrate that runs it | on PyPI (0.9.5) |
+| `~/sites/podpack-notes` | the notes app, in its own repository | on PyPI (0.1.4); installed by the demo site |
+| `~/sites/podpack-demo` | a site, and the worked output of following `creating-a-site.md` | podpack-notes from PyPI; podpack from a git tag, on purpose — the one build left that exercises the image's git layer (§4) |
+| `~/sites/podpack-pdf` | the PDF tools as a standalone installable package | on PyPI (0.2.2); **reconciled** — installs as a podpack app and still works as a plain blueprint (§5) |
+| `~/sites/podpack-pages` | content for podpack sites — prose pages, a blog and course books, as three app kinds | on PyPI (0.3.5); installed three times over by holdenweb.com (ADR-0038) |
+| `~/sites/podpack-qrcode` | QR code generation | on PyPI (0.2.2); installed by holdenweb.com |
+| `~/sites/podpack-notebooks` | Jupyter notebooks published as static HTML | on PyPI (0.1.2); installed by holdenweb.com |
+| `~/sites/holdenweb.com` | the first site, and the reference implementation (§1) | **adapted** and merged (§6); installs podpack and four apps from PyPI, with staging and production deployments on Opalstack |
+
+*Versions as published on 2026-10-28.*
 
 Guardrail carried over from the earlier sessions and still in force: **do not
 change anything outside the current working directory without asking first.**
@@ -338,8 +343,9 @@ database only from `SQLALCHEMY_DATABASE_URI`.
 
 ## 5. `podpack-pdf`: the first external plugin — reconciled
 
-`~/sites/pp-pdf` (formerly `~/sites/hwpdf`) holds the PDF booklet and
-page-splitting tools. It was built against the *speculative* discovery design in
+`~/sites/podpack-pdf` (formerly `~/sites/pp-pdf`, and before that
+`~/sites/hwpdf`) holds the PDF booklet and page-splitting tools. It was built
+against the *speculative* discovery design in
 an earlier draft of this brief rather than the registry that actually got built,
 so the two did not fit together. They now do, along the lines this section
 originally recommended: a `site_app` alongside the existing `pdf_blueprint`
