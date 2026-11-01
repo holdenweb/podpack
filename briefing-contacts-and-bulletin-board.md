@@ -13,9 +13,10 @@ routes and no design. Those are for the sessions that follow, and for Steve to
 approve before anything structural is built.
 
 **Written 2026-09-29, revised to 2026-10-14**, against podpack `0.9.5+dev`,
-holdenweb.com `1.8.5+dev`, staging running `6939fb5`. Version-sensitive claims
-carry their own date; treat this as a document, not a test result, if you are
-reading it against something newer.
+holdenweb.com `1.8.5+dev`, staging running `6939fb5`. **Where mail lands (App
+1) was rewritten on 2026-11-01**, once Steve had decided it and it had been
+tested by hand. Version-sensitive claims carry their own date; treat this as a
+document, not a test result, if you are reading it against something newer.
 
 It lives in podpack because that is where app-authoring guidance lives, but it
 spans the estate: links beginning `../holdenweb.com/` resolve only in a
@@ -195,8 +196,10 @@ anything; absence at the default one is not proof of no DKIM.)
 says *consumer* throughout and reasons from it, including its rejection of SES,
 Postmark and Mailgun on scale grounds. **That premise is wrong, so the costs
 that record weighs are wrong.** Records are immutable; this wants a superseding
-HW record, which did not exist when this was written. Do not take HW-0030's
-mail economics at face value. (Not to be confused with podpack's **ADR-0030**,
+HW record, which did not exist when this was written and is now
+[HW-0037](../holdenweb.com/adrs/0037-the-site-sends-as-itself-through-a-mailbox-of-its-own.md),
+proposed 2026-11-01. Do not take HW-0030's mail economics at face value. (Not
+to be confused with podpack's **ADR-0030**,
 which is about apps reporting health — an unrelated record, and exactly why the
 bare-number convention above matters.)
 
@@ -221,6 +224,10 @@ in the console before designing on it:
 And note that `os.holdenweb.com` has its own Opalstack MX — **the deployment's
 hostname can already receive mail.** That is the cheapest candidate inbound
 path in the estate and nobody has written it down. A candidate, not a decision.
+
+*Overtaken 2026-11-01: `os.holdenweb.com` has no MX or TXT record today, and
+the inbound path is decided — `mail.holdenweb.com`, delegated to Opalstack
+(App 1).*
 
 *Earlier draft of this document said both records were missing on
 `holdenweb.com`. That was checked on 2026-09-29 and was true then as far as two
@@ -349,34 +356,49 @@ no honeypot, no anti-spam of any kind, and no HTML sanitisation library
 string is `secure_filename()` in podpack-pdf. Jinja autoescapes, which covers
 display; it does not cover storing, mailing on, or rendering anywhere else.
 
-**Where public mail lands — decided by Steve, 2026-10-12.**
-`info@holdenweb.com` is advertised in the footer of every page
+**Where mail lands — decided by Steve, 2026-11-01**, and recorded in
+[ADR-0040](adrs/0040-each-site-has-a-mailbox-and-each-deployment-an-address.md)
+and
+[HW-0037](../holdenweb.com/adrs/0037-the-site-sends-as-itself-through-a-mailbox-of-its-own.md),
+both *proposed* until the sending app is built and cut over. They carry the
+reasoning and the alternatives; this is what a design has to know.
+
+**The app has a mailbox of its own, and it is not at Google.** Each site has
+one Opalstack mailbox, `${SITE}-admin`, in `mail.holdenweb.com` — a subdomain
+delegated to Opalstack, which publishes its MX, SPF, DKIM and DMARC itself.
+Each deployment has an address delivering into it, `${SITE}-stag@` and
+`${SITE}-prod@`; for this site, `hw-admin`, `hw-stag@` and `hw-prod@`. A
+deployment logs in as the site's mailbox and sends from its own address.
+Transactional mail moves there too, retiring the Gmail App Password of §2.
+
+**The mailbox is shared, so a deployment must pick out its own mail.** Staging
+and production read the same inbox. A fetch — IMAP, from a CLI command on host
+cron (§3) — selects by `X-Original-To`, or staging acts on production's
+correspondence.
+
+**Verified by hand with `hw` on 2026-11-01**, sending with
+`holdenweb.com/scratch/mailtest.py` (untracked):
+
+- from `hw-stag@`, authenticated as `hw-admin` through
+  `smtp.de.opalstack.com:465`, to a Workspace inbox: SPF, DKIM and DMARC all
+  pass;
+- a reply arrived with `X-Original-To` naming `hw-stag@`;
+- `hw-stag+<tag>@` is delivered, so a token in `Reply-To:` can make a reply
+  self-identifying without trusting `In-Reply-To`/`References`, which clients
+  mangle or strip — **but whether `X-Original-To` keeps the tag is not yet
+  checked**;
+- a hyphenated mailbox name is accepted, and authenticates.
+
+§4's `Message-ID` wants a domain the site controls; `mail.holdenweb.com` is now
+the obvious one.
+
+**`info@holdenweb.com` stays with people, and the app never reads it.** It is
+advertised in the footer of every page
 ([templates/base.html:81](../holdenweb.com/src/holdenweb/templates/base.html)) and
-is a *different address* from the one the site authenticates and sends as.
-It is to be a **Google Group**, and whoever holds podpack's `admin` role is
-also to be a member of that group. So the site's administrator and the public
-contact point are deliberately the same person, by membership rather than by
-the address being an alias.
-
-**That decision constrains how an app can read it, and the constraint is not
-obvious.** A Google Group is not a Gmail mailbox: `users.messages.list` and
-`users.watch` operate on user mailboxes, so **the Gmail API cannot poll a
-Group.** A Group's own archive is reachable only through different APIs. Three
-ways out, and the choice belongs with the design:
-
-- Give the app its **own user mailbox** — `enquiries@`, say — delegated to a
-  service account, and make that mailbox a member of the `info@` Group. The
-  app reads only its own mailbox; humans keep the Group. This is the one that
-  keeps the app's access scoped.
-- Poll the **admin member's** mailbox. Cheapest, and wrong: the app would hold
-  delegation over a person's personal mail to find the fraction addressed to
-  the site.
-- Keep `info@` for humans and give the app a **separate advertised address**
-  entirely, with the `+token` threading on that one.
-
-Confirm the Group/mailbox distinction against the Workspace console before
-building on it — it is stated here from platform behaviour, not from anything
-verified in this estate.
+is to be a **Google Group** whose members include whoever holds podpack's
+`admin` role (Steve, 2026-10-12). That the Gmail API cannot poll a Group
+constrained every design that had the app reading Google. It does not
+constrain this one.
 
 ---
 
@@ -593,6 +615,8 @@ in a *seeded* file never reaches an existing site); failure policy stays the
 site's through `PODPACK_MAIL_UTIL_CLS`, which podpack reads as a class object at
 `auth.install` and an app therefore cannot set — the app ships the class, the
 site names it; and transactional mail stays apart from correspondence.
+*Overtaken 2026-11-01 on that last point: HW-0037 moves holdenweb.com's
+transactional mail into the site's own mailbox (App 1).*
 
 ### Settled: podpack does not do package management
 
