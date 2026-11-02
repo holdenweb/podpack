@@ -15,7 +15,8 @@ approve before anything structural is built.
 **Written 2026-09-29, revised to 2026-10-14**, against podpack `0.9.5+dev`,
 holdenweb.com `1.8.5+dev`, staging running `6939fb5`. **Where mail lands (App
 1) was rewritten on 2026-11-01**, once Steve had decided it and it had been
-tested by hand. Version-sensitive claims carry their own date; treat this as a
+tested by hand, and §8 and open question 4 on 2026-11-02, when flask-paranoid
+went. Version-sensitive claims carry their own date; treat this as a
 document, not a test result, if you are reading it against something newer.
 
 It lives in podpack because that is where app-authoring guidance lives, but it
@@ -282,45 +283,35 @@ installable only from the **site's** `_wire`.
 Use `FlaskForm` for anything that takes a POST, or raise the question with
 Steve.
 
-### 8. Sessions are bound to IP and User-Agent, and break silently.
+### 8. Sessions are guarded by flask-login alone, which marks a moved session untrusted and evicts nobody.
 
-`holdenweb.com` wires **flask-paranoid**, an unconditional site-wide
-`before_request` (confirmed present on the booted app). It hashes
-`X-Forwarded-For[0] + "|" + User-Agent`, and when the stored token differs it
-**clears the session and 302s to `/`** — with no flash and no message.
+*Rewritten 2026-11-02, when holdenweb.com dropped flask-paranoid (holdenweb.com
+`1623a25` and `253aeab`). Until then this section described paranoid: an
+unconditional site-wide `before_request` that, when `X-Forwarded-For[0]` or the
+User-Agent changed, **cleared the session and the remember-me cookie and 302'd
+to `/`**, with no message — so a visitor on mobile data or a VPN lost a
+half-written form and was logged out, and no app could opt out of it.*
 
-So a visitor on mobile data, a VPN, carrier NAT — or whose browser auto-updates
-its User-Agent mid-session — loses a half-written enquiry or forum post and
-lands on the front page with no explanation. It clears the remember-me cookie
-too (`paranoid.py:99-111`), so the effect is a full logout, not just a reset
-session. It writes `_paranoid_token` on the **first** request of any session, so
-every anonymous visitor is given a cookie before interacting with anything. And
-it is registered on the app, so **no app can opt out, exempt a route, or catch
-it**.
+What guards a session now is flask-login's own protection, at `basic`. Read off
+the site booted as a deployment on 2026-11-02: `SESSION_PROTECTION` is unset in
+config, `login_manager.session_protection` is `'basic'`, and flask-principal's
+is the only `before_request` hook. It computes
+`sha512(X-Forwarded-For[0] | User-Agent)` (`_create_identifier`,
+`flask_login/utils.py:392`, in flask-login 0.6.3), and two things about it
+decide what a public form can do:
 
-**But the site is not relying on it alone, which is the part that decides what
-to do about it.** flask-login's own session protection is already active at
-`basic` — verified on the booted app: `SESSION_PROTECTION` is unset in config
-and `login_manager.session_protection` is `'basic'`. It computes
-`sha512(X-Forwarded-For[0] | User-Agent)`, the same two inputs by the same
-client-trusting rule as paranoid's `sha256`
-(`flask_login/utils.py:383-401`). Two differences matter:
+- **It does not evict.** `basic` sets `_fresh = False` and carries on
+  (`login_manager.py:385-400`), so a session that moves is merely untrusted for
+  `fresh_login_required` views rather than destroyed. `SESSION_PROTECTION =
+  'strong'` would bring eviction back, on every page, if it were ever wanted.
+- **It skips empty sessions** (`if sess and ident != sess.get("_id", None)`),
+  so anonymous visitors are untouched — which is exactly the population filling
+  in a public contact form.
 
-- **It does not evict.** `basic` sets `_fresh = False` and continues, so a
-  session that moves is merely untrusted for `fresh_login_required` views
-  rather than destroyed. `SESSION_PROTECTION = 'strong'` restores eviction if
-  wanted.
-- **It skips empty sessions** (`if sess and ident != sess.get("_id")`), so
-  anonymous visitors are untouched — which is exactly the population filling in
-  a public contact form.
-
-So `X-Forwarded-For` is read by **three** things here, not two: paranoid,
-flask-login, and podpack's own centralised hop count. Dropping paranoid removes
-a duplicate, not the trust question.
-
-Any multi-step flow, any long form, any "come back and finish later" is wrong
-on this site while paranoid is wired. What is *not* true is that removing it
-would leave sessions unprotected.
+So a long form, a multi-step flow or "come back and finish later" is no longer
+wrong on this site. `X-Forwarded-For` is still read by two things — flask-login
+and podpack's own centralised hop count — so the question of whom to trust for
+it remains; removing paranoid took away a duplicate, not that.
 
 ### 9. There is exactly one role, and the nav shows everything to everybody.
 
@@ -552,15 +543,14 @@ gitignore-honouring shim:
 3. **Whether `SESSION_COOKIE_SAMESITE` and `SESSION_COOKIE_SECURE` should be
    set for real.** They are dead code today (§6). This is a live defect,
    independent of either new app.
-4. **Whether flask-paranoid stays.** Its behaviour (§8) is incompatible with
-   any long public form, and it is recorded nowhere as a deliberate trade.
-   Analysed 2026-10-14: dropping it costs less than it appears, because
+4. ~~**Whether flask-paranoid stays.**~~ *Settled 2026-11-02: it went*
+   (holdenweb.com `1623a25` and `253aeab`), on the analysis of 2026-10-14:
    flask-login's `basic` protection already runs on the same signal without
-   evicting. What it would cost is hard eviction of a moved session; what
-   compensates, and wants doing either way, is actually setting
-   `SESSION_COOKIE_SECURE` and `SESSION_COOKIE_SAMESITE` (dead today, §6) and
-   shortening the 31-day `PERMANENT_SESSION_LIFETIME`. Those protect the cookie
-   from being captured, which an IP check does not.
+   evicting, so what went was hard eviction of a moved session (§8). Of what
+   was to compensate, the cookie flags are now really set — read off a booted
+   deployment the same day, the session cookie is `SameSite=Lax` and `Secure`
+   (HW-0035) — but `PERMANENT_SESSION_LIFETIME` is still 31 days. Those protect
+   the cookie from being captured, which an IP check never did.
 5. **Whether mail handling belongs in podpack rather than in each site.**
    Raised by Steve, 2026-10-12. The recommendation below was reversed on
    2026-10-14 after both premises behind it were falsified: both halves are now

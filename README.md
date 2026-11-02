@@ -221,10 +221,11 @@ toolchain is added.
 
 ### What a site wires for itself
 
-Some things belong to the site rather than to any one feature — session
-policy, and what a mail failure tells the visitor. They are not apps, so they do
-not go in the `apps` list: pass a `callable(app)` as `init` instead. Login is
-podpack's own, and mail is an app, `podpack-mail`
+Some things belong to the site rather than to any one feature — its cookie
+policy, which login features it turns on, and what a mail failure tells the
+visitor. They are not apps, so they do not go in the `apps` list: pass a
+`callable(app)` as `init` instead. Login is podpack's own, and mail is an app,
+`podpack-mail`
 ([ADR-0041](https://github.com/holdenweb/podpack/blob/main/adrs/0041-sending-mail-is-an-app.md)).
 
 ```python
@@ -236,7 +237,7 @@ def create_app():
 
 def _wire(app):
     app.config["PODPACK_MAIL_UTIL_CLS"] = ReportingMailUtil   # what a mail failure says
-    paranoid.init_app(app)                                    # session policy
+    app.config.update(SESSION_COOKIE_SAMESITE="Lax")          # cookie policy
 ```
 
 It runs **after** the site's config is loaded and **before** the apps are
@@ -247,15 +248,17 @@ there is nothing to resolve an app from. Without the context the site does not
 boot — it fails with `RuntimeError: Working outside of application context.` —
 and an app's own `SiteApp.init` is subject to exactly the same rule.
 
-The reason these are not apps is worth knowing, because writing shims to make
-them look like apps is a natural first thought: `flask-paranoid` registers no
-blueprint at all, and `flask-security` brings its own, created inside
-`init_app`. A `SiteApp` is built around a blueprint, so a shim would mean
-inventing one — and then inheriting a template namespace, a data directory and a
-log directory that nothing uses. See
+An extension wired here is not an app either, and the reason is worth knowing,
+because writing a shim to make one look like an app is a natural first thought.
+Most extensions register no blueprint at all, and `flask-security` brings its
+own, created inside `init_app`. A `SiteApp` is built around a blueprint, so a
+shim would mean inventing one — and then inheriting a template namespace, a data
+directory and a log directory that nothing uses. See
 [ADR-0025](https://github.com/holdenweb/podpack/blob/main/adrs/0025-the-site-wires-its-own-extensions.md).
-Mail was the third such extension, until it became an app whose blueprint
-found a job: carrying the `mail` commands.
+Of the three extensions that record measured, login has since become podpack's
+(ADR-0033), and mail an app whose blueprint found a job, carrying the `mail`
+commands (ADR-0041). holdenweb.com, which this example comes from, dropped the
+third, `flask-paranoid`, altogether.
 
 ### The app's name is its blueprint's name
 
