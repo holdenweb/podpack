@@ -684,18 +684,24 @@ and is wrong in a way nothing else reports.
 
 `/_status` answers a member of the `admin` role and nobody else, and a fresh
 database has neither the role nor a user — so a new site's operator view is
-unreachable until three commands have been run. They are flask-security's
-own, not podpack's:
+unreachable until three commands have been run, and a fourth on a site that
+turns on email confirmation:
 
 ```bash
 flask --app mysite users create you@example.com --active
 flask --app mysite roles create admin
 flask --app mysite roles add you@example.com admin
+flask --app mysite users confirm you@example.com
 ```
 
 The password is prompted for, hidden and confirmed. **`--active` matters**:
 without it the account is created and cannot sign in, which looks exactly
-like a wrong password.
+like a wrong password. **So does `users confirm`, wherever
+`SECURITY_CONFIRMABLE` is on.** flask-security then refuses login to an account
+whose `confirmed_at` is unset, saying *Email requires confirmation.*, and sets
+it only when the mailed link is followed — `users create` never does, `--active`
+or not. It is safe to repeat, and says so when the account was already
+confirmed.
 
 Login itself is podpack's, not yours to wire —
 [ADR-0033](https://github.com/holdenweb/podpack/blob/main/adrs/0033-login-is-core.md).
@@ -708,10 +714,13 @@ and so does what a mail failure says. Mail itself is an app
 ([ADR-0041](https://github.com/holdenweb/podpack/blob/main/adrs/0041-sending-mail-is-an-app.md)),
 and a site whose login sends mail will not start without one installed.
 
-The three commands above are still flask-security's rather than podpack's,
-because they exist, validate the identity through the registration form and
-resolve users the way the rest of flask-security does; a framework copy would
-only be a worse one.
+Three of those commands are flask-security's rather than podpack's, because
+they exist, validate the identity through the registration form and resolve
+users the way the rest of flask-security does; a framework copy would only be a
+worse one. The fourth, `users confirm`, is podpack's, because flask-security has
+no command that sets `confirmed_at`. podpack adds it to flask-security's own
+`users` group, beside `activate`, and steps aside should a flask-security
+release ever ship one of its own.
 
 **podpack says so at boot** when the role does not exist yet:
 

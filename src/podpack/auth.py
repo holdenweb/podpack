@@ -24,9 +24,14 @@ import functools
 from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar
 
+import click
 from flask import Flask, abort, current_app
+from flask.cli import with_appcontext
 from flask_security import Security, SQLAlchemyUserDatastore, current_user
+from flask_security.cli import users as security_users
+from flask_security.confirmable import confirm_user
 from flask_security.models import fsqla_v3 as fsqla
+from flask_security.utils import lookup_identity
 
 from .database import db
 
@@ -34,13 +39,16 @@ ADMIN_ROLE = "admin"
 """The role `/_status` asks about, and the one every site needs first.
 
     flask --app <site> users create you@example.com --active
+    flask --app <site> users confirm you@example.com
     flask --app <site> roles create admin
     flask --app <site> roles add you@example.com admin
 
-Those are flask-security's own commands, which arrive with it. podpack ships no
-copy of them: they validate the identity through the registration form and
-resolve users the way the rest of flask-security does, so a framework version
-could only be a worse one.
+All but `users confirm` are flask-security's own commands, which arrive with
+it. podpack ships no copy of them: they validate the identity through the
+registration form and resolve users the way the rest of flask-security does,
+so a framework version could only be a worse one. `users confirm` is the one
+flask-security does not have (see `users_confirm`), and a site with
+confirmation on needs it before that first account can sign in.
 """
 
 NEEDED_TABLES = frozenset({"user", "role", "roles_users"})
@@ -154,6 +162,45 @@ def install(app: Flask, mail_util_cls: type | None = None) -> None:
     """
     extra = {} if mail_util_cls is None else {"mail_util_cls": mail_util_cls}
     Security(app=app, datastore=user_datastore, **extra)  # type: ignore[arg-type]
+    _add_confirm_command(app)
+
+
+# flask-security sets confirmed_at only when the mailed link is followed, and
+# ships no command that sets it. So on a site with confirmation on, an account
+# made with `users create` cannot sign in, `--active` or not -- which is what
+# holdenweb.com's operator met, and worked round with a shell snippet. This is
+# that snippet as a command, shaped and worded like `users activate` beside it.
+@click.command("confirm")
+@click.argument("user")
+@with_appcontext
+def users_confirm(user: str) -> None:
+    """Confirm a user, as following the mailed link would.
+
+    USER is identity as defined by SECURITY_USER_IDENTITY_ATTRIBUTES.
+    """
+    user_obj = lookup_identity(user)
+    if user_obj is None:
+        raise click.UsageError("User not found.")
+    if confirm_user(user_obj):
+        user_datastore.commit()
+        click.secho(f'User "{user}" has been confirmed.', fg="green")
+    else:
+        click.secho(f'User "{user}" was already confirmed.', fg="yellow")
+
+
+def _add_confirm_command(app: Flask) -> None:
+    """Give flask-security's `users` group the `confirm` it lacks.
+
+    flask-security keeps its command groups as module globals and registers the
+    same objects on every app, so there is no per-app copy to add to: this adds
+    to the shared group, once. It steps aside when the group already has a
+    `confirm` -- flask-security's own, should a release ever ship one -- and
+    does nothing on a site that switched flask-security's commands off.
+    """
+    if security_users not in app.cli.commands.values():
+        return
+    if "confirm" not in security_users.commands:
+        security_users.add_command(users_confirm)
 
 
 MAILING_FEATURES: tuple[tuple[str, Callable[[Callable[[str], Any]], Any]], ...] = (
