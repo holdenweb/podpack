@@ -385,8 +385,20 @@ correspondence.
 - a reply arrived with `X-Original-To` naming `hw-stag@`;
 - `hw-stag+<tag>@` is delivered, so a token in `Reply-To:` can make a reply
   self-identifying without trusting `In-Reply-To`/`References`, which clients
-  mangle or strip — **but whether `X-Original-To` keeps the tag is not yet
-  checked**;
+  mangle or strip;
+- **but `X-Original-To` drops the tag**, reading `hw-stag@`. The tag survives
+  in `Delivered-To`, on the mailbox's own address
+  (`hw-admin+tag@imap2.de.opalstack.com`), so the deployment comes from one
+  header and the token from the other. A sender can put headers of either name
+  into the message itself, and whether Opalstack strips them is not checked:
+  set aside a message carrying more than one of either, and make the token
+  unguessable, since anyone can send to a tagged address;
+- the envelope sender arrives rewritten by SRS
+  (`Return-Path: <SRS0=…@2.srs.de.opalstack.email>`), so a sender is read
+  from `From:`, not `Return-Path`;
+- the mailbox is on `imap2.de.opalstack.com`, a different machine from
+  `imap.de.opalstack.com`; which name the fetch should connect to is not
+  checked;
 - a hyphenated mailbox name is accepted, and authenticates.
 
 §4's `Message-ID` wants a domain the site controls; `mail.holdenweb.com` is now

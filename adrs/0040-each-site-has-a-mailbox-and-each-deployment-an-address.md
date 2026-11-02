@@ -84,11 +84,15 @@ panel, messages sent with `holdenweb.com/scratch/mailtest.py`:
 - a reply arrived with `X-Original-To` naming `hw-stag@`;
 - `hw-stag+<tag>@` is delivered, so a token in `Reply-To:` can make a reply
   self-identifying;
+- on that message `X-Original-To` dropped the tag and read `hw-stag@`, while
+  `Delivered-To` kept it, on the mailbox's own address
+  (`hw-admin+tag@imap2.de.opalstack.com`) — so a deployment is known by one
+  header and a reply's token by the other;
 - a hyphenated mailbox name is accepted, and authenticates.
 
-Not verified: whether `X-Original-To` keeps the `+tag`; and the whole API path
-— the token's scoping, how long `PENDING_CREATE` lasts, and which permission
-yields the IMAP server's id that `mailuser/create` requires.
+Not verified: the whole API path — the token's scoping, how long
+`PENDING_CREATE` lasts, and which permission yields the IMAP server's id that
+`mailuser/create` requires.
 
 **Staging holds production's credential.** With one mailbox per site, staging
 can read production's correspondence and can send as production. That is
@@ -109,10 +113,11 @@ already exists gets it by hand, once, in the file `compose.yaml` says is never
 edited.
 
 **The provider lives in one script.** Leaving Opalstack means rewriting the
-provisioner, not the apps. But the scheme relies on two behaviours of
-Opalstack's mail server — it accepts a `From:` that is one of the mailbox's
-addresses rather than its login, and it adds `X-Original-To` — and a provider
-without them would need a mailbox per address.
+provisioner, not the apps. But the scheme relies on three behaviours of
+Opalstack's mail server: it accepts a `From:` that is one of the mailbox's
+addresses rather than its login; it adds `X-Original-To`; and it carries a
+`+tag` through to `Delivered-To`. A provider without the first two would need
+a mailbox per address.
 
 **It adds a name.** `${SITE}` joins the names ADR-0037 counts, and nothing
 derives it from them. It is chosen once per site and appears in every address a
