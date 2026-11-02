@@ -1,9 +1,12 @@
 # ADR-0025: The site wires its own extensions
 
 **Status:** Accepted — its **login** clause is superseded by
-[ADR-0033](0033-login-is-core.md). Mail and session policy stand, and the
-reasoning below about why none of the three is an *app* is untouched: what
-changed is who owns login, not what it is.
+[ADR-0033](0033-login-is-core.md), and its **mail** clause by
+[ADR-0041](0041-sending-mail-is-an-app.md), which makes the transport an app.
+Session policy stands, and so does the site's say over what a mail failure
+tells the visitor. The reasoning below about blueprints is untouched; what
+answered it for mail is that the blueprint found a job, carrying the `mail`
+commands.
 
 **Date:** 2026-08-08
 

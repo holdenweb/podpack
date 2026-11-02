@@ -125,6 +125,12 @@ satisfy them (ADR-0034). You **cannot** declare that you need mail.
 
 Reach it as `current_app.extensions["mailman"]`.
 
+*Overtaken 2026-11-02: mail is an app, `podpack-mail`
+([ADR-0041](adrs/0041-sending-mail-is-an-app.md)). The extension is still
+`mailman`, so the line above stands; what changed is who installs it. An app
+still cannot declare that it needs mail, but podpack now refuses to start a
+site whose login sends mail with no transport installed.*
+
 ### 2. Sending is synchronous, inside the request, with two workers.
 
 `smtp.gmail.com:465` over SSL as `steve@holdenweb.com`, `MAIL_PASSWORD` a Gmail
@@ -620,6 +626,11 @@ The two real costs:
   Note that check is neither `needs_secrets` nor `requires_apps`: it is
   *site-config → app*, a third relation, and it is the part to decide
   deliberately rather than discover.
+  *Corrected 2026-11-02: flask-security 5.8.2 and 5.9.2 do have an else
+  branch — `raise ValueError("No email extension configured")` — so the
+  failure is loud, at first use, in front of a visitor. The boot check was
+  built anyway, to fail before that: `podpack.auth.check_mail`
+  ([ADR-0041](adrs/0041-sending-mail-is-an-app.md)).*
 
 Unchanged from the earlier recommendation: deployment settings follow the
 deployment (ADR-0018/0036/0039, including 0039's lesson that a variable shipped

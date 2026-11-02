@@ -312,7 +312,8 @@ database only from `SQLALCHEMY_DATABASE_URI`.
   the open question here; settled by ADR-0028/0029, 2026-08-13). podpack offers
   it as a compose *overlay* the site chooses through `COMPOSE_FILE` /
   `podpack substrate init --services`, with the client wired into
-  `app.extensions` by the site's own `init` exactly as mail is (ADR-0025):
+  `app.extensions` by the site's own `init`, as mail was until ADR-0041 made
+  it an app (ADR-0025):
   `src/podpack/services/` catalogues it and `compose.mongodb.yaml` ships the
   overlay. PostgreSQL is required, MongoDB optional (ADR-0029). The
   `COMPOSE_PROFILES=mongo` shape once sketched here was measured and rejected —

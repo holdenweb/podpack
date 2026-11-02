@@ -13,14 +13,16 @@ thing the framework's own endpoints require is not optional, and calling it
 optional produces sites that cannot do what the framework documents. Two of
 ours could never answer `/_status` at all.
 
-Mail and session policy stay the site's under ADR-0025, which is unchanged
-except for its login clause. They are genuinely per-site: a site picks its own
-mail server, or sends no mail.
+Session policy stays the site's under ADR-0025, and so does what a mail failure
+says -- the class named in `PODPACK_MAIL_UTIL_CLS`. The mail transport itself
+became an app under ADR-0041, which is why `check_mail` is here: login decides
+whether a site sends mail, an app decides whether it can, and only podpack
+installs both.
 """
 
 import functools
 from collections.abc import Callable
-from typing import ParamSpec, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 from flask import Flask, abort, current_app
 from flask_security import Security, SQLAlchemyUserDatastore, current_user
@@ -152,3 +154,73 @@ def install(app: Flask, mail_util_cls: type | None = None) -> None:
     """
     extra = {} if mail_util_cls is None else {"mail_util_cls": mail_util_cls}
     Security(app=app, datastore=user_datastore, **extra)  # type: ignore[arg-type]
+
+
+MAILING_FEATURES: tuple[tuple[str, Callable[[Callable[[str], Any]], Any]], ...] = (
+    ("CONFIRMABLE", lambda cv: cv("CONFIRMABLE")),
+    (
+        "REGISTERABLE with SEND_REGISTER_EMAIL",
+        lambda cv: cv("REGISTERABLE") and cv("SEND_REGISTER_EMAIL"),
+    ),
+    (
+        "RECOVERABLE",
+        lambda cv: cv("RECOVERABLE")
+        and (cv("SEND_PASSWORD_RESET_EMAIL") or cv("SEND_PASSWORD_RESET_NOTICE_EMAIL")),
+    ),
+    (
+        "CHANGEABLE with SEND_PASSWORD_CHANGE_EMAIL",
+        lambda cv: cv("CHANGEABLE") and cv("SEND_PASSWORD_CHANGE_EMAIL"),
+    ),
+    ("CHANGE_EMAIL", lambda cv: cv("CHANGE_EMAIL")),
+    (
+        "CHANGE_USERNAME with SEND_USERNAME_CHANGE_EMAIL",
+        lambda cv: cv("CHANGE_USERNAME") and cv("SEND_USERNAME_CHANGE_EMAIL"),
+    ),
+    ("USERNAME_RECOVERY", lambda cv: cv("USERNAME_RECOVERY")),
+    ("PASSWORDLESS", lambda cv: cv("PASSWORDLESS")),
+    (
+        "TWO_FACTOR, by email or with its rescue mail",
+        lambda cv: cv("TWO_FACTOR")
+        and ({"email", "mail"} & set(cv("TWO_FACTOR_ENABLED_METHODS") or ()) or cv("TWO_FACTOR_RESCUE_EMAIL")),
+    ),
+    (
+        "UNIFIED_SIGNIN by email",
+        lambda cv: cv("UNIFIED_SIGNIN") and "email" in (cv("US_ENABLED_METHODS") or ()),
+    ),
+)
+"""What flask-security sends mail for, and the settings that make it do so.
+
+Read off its `send_mail` call sites in 5.8.2 rather than from memory or its
+documentation: each is a feature flag, and some carry a `SEND_*` switch of
+their own. A table, because flask-security has no question of its own to ask
+-- a release that adds a mailing feature adds a row here, and a test."""
+
+
+def check_mail(app: Flask) -> None:
+    """Refuse to start a site whose login sends mail that nothing can carry.
+
+    flask-security finds its transport per send and, with none, raises
+    `ValueError("No email extension configured")` -- on the first registration
+    or password reset, in front of a visitor. Which features send mail is the
+    site's configuration; what carries it is an app (ADR-0041); neither can see
+    the other, so podpack, which installs both, is the one place to check.
+
+    Any registered transport satisfies it: flask-mailman's `mailman`, or
+    Flask-Mail's `mail`, which flask-security also accepts. Whether that
+    transport can log in to its server is `flask mail check`'s business, not
+    boot's -- boot runs on every restart, and a mail server is somebody else's.
+    """
+    if "mailman" in app.extensions or "mail" in app.extensions:
+        return
+
+    def cv(name: str) -> Any:
+        return app.config.get(f"SECURITY_{name}")
+
+    sending = [name for name, sends in MAILING_FEATURES if sends(cv)]
+    if sending:
+        raise RuntimeError(
+            "this site cannot start: its login sends mail ("
+            + "; ".join(sending)
+            + ") and nothing is installed to send it. Add a mail app such as "
+            "podpack_mail to [site] apps, or turn those features off."
+        )

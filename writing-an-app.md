@@ -700,14 +700,21 @@ file; secrets come from the environment
 
 ### What you may assume about the site
 
-The site wires its own extensions — mail, login, session policy — in its own
-`init`, which is not an app because two of those register no blueprint and the
-third brings its own ([ADR-0025](adrs/0025-the-site-wires-its-own-extensions.md)).
-podpack runs the site's `init` **before** any app's, so by the time yours runs
-you may read `app.extensions[...]` for a service the site registered.
+The site wires its own extensions — session policy, and anything else that is
+not an app — in its own `init`
+([ADR-0025](adrs/0025-the-site-wires-its-own-extensions.md)). Login is
+podpack's ([ADR-0033](adrs/0033-login-is-core.md)), and mail is an app,
+`podpack-mail` ([ADR-0041](adrs/0041-sending-mail-is-an-app.md)). podpack runs
+the site's `init` **before** any app's, so by the time yours runs you may read
+`app.extensions[...]` for a service the site registered. A service another
+*app* registers may not exist yet when your `init` runs — that depends on where
+the site lists the two — so look it up when you use it.
 
 What you cannot do is *declare* that you need one. There is no mechanism for
-"this app requires mail", so check for it and degrade, or say so in your README.
+"this app requires mail": look up `current_app.extensions.get("mailman")` when
+you send, degrade without it, and say in your README that the site should
+install `podpack-mail`. podpack checks only what login needs — a site whose
+login sends mail will not start without a transport.
 
 ## 9. Navigation
 
@@ -1381,7 +1388,8 @@ Honest notes, from building an app rather than imagining one.
   tables it can state, and podpack refuses to boot a site that cannot satisfy
   them ([ADR-0034](adrs/0034-apps-declare-what-they-need.md)) — that gap is
   closed. What is still missing: a **podpack version floor**, which remains
-  prose and hope, and a **service the site wires**, such as mail. A backing
+  prose and hope, and a way to say you need **another app**, such as
+  `podpack-mail` for mail ([ADR-0041](adrs/0041-sending-mail-is-an-app.md)). A backing
   store is a decision rather than a gap: which core services a site runs is
   the site owner's, independently of its apps
   ([ADR-0028](adrs/0028-core-services-are-overlays-the-site-chooses.md)), so

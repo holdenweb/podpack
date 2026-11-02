@@ -170,6 +170,9 @@ def create_app(
     auth.install(app, mail_util_cls=app.config.get("PODPACK_MAIL_UTIL_CLS"))
 
     install_apps(app, installed_apps(host_config))
+    # After the apps, because what carries login's mail is installed as one
+    # (ADR-0041): only now can podpack see whether anything will.
+    auth.check_mail(app)
     # After the apps, so anything that routes `/` keeps it; see install_home_page.
     install_home_page(app)
 

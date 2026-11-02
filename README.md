@@ -221,9 +221,11 @@ toolchain is added.
 
 ### What a site wires for itself
 
-Some things belong to the site rather than to any one feature — mail, login,
-session policy. They are not apps, so they do not go in the `apps` list: pass a
-`callable(app)` as `init` instead.
+Some things belong to the site rather than to any one feature — session
+policy, and what a mail failure tells the visitor. They are not apps, so they do
+not go in the `apps` list: pass a `callable(app)` as `init` instead. Login is
+podpack's own, and mail is an app, `podpack-mail`
+([ADR-0041](https://github.com/holdenweb/podpack/blob/main/adrs/0041-sending-mail-is-an-app.md)).
 
 ```python
 # holdenweb/__init__.py -- what gunicorn is pointed at
@@ -233,28 +235,27 @@ def create_app():
     return podpack.create_app(site_package="holdenweb", init=_wire)
 
 def _wire(app):
-    # `app_config` needs an app context and podpack pushes none before calling
-    # init; and with no request to resolve an app from, the name is required.
-    with app.app_context():
-        settings = podpack.app_config("mail")      # from [apps.mail] or your own table
-    app.config.update(MAIL_SERVER=settings["server"])
-    mail.init_app(app)
-    security.init_app(app, user_datastore)
+    app.config["PODPACK_MAIL_UTIL_CLS"] = ReportingMailUtil   # what a mail failure says
+    paranoid.init_app(app)                                    # session policy
 ```
 
 It runs **after** the site's config is loaded and **before** the apps are
-installed, so an app's own `init` can rely on a service the site registered.
-Without the `app_context()` the site does not boot — it fails with
-`RuntimeError: Working outside of application context.`, and an app's own
-`SiteApp.init` is subject to exactly the same rule.
+installed, so an app's own `init` can rely on a service the site registered. If
+it reads `podpack.app_config()`, wrap that in `with app.app_context():` and pass
+the name: podpack pushes no context before calling `init`, and with no request
+there is nothing to resolve an app from. Without the context the site does not
+boot — it fails with `RuntimeError: Working outside of application context.` —
+and an app's own `SiteApp.init` is subject to exactly the same rule.
 
 The reason these are not apps is worth knowing, because writing shims to make
-them look like apps is a natural first thought: `flask-mailman` and
-`flask-paranoid` register no blueprint at all, and `flask-security` brings its
-own, created inside `init_app`. A `SiteApp` is built around a blueprint, so a
-shim would mean inventing one — and then inheriting a template namespace, a data
-directory and a log directory that nothing uses. See
+them look like apps is a natural first thought: `flask-paranoid` registers no
+blueprint at all, and `flask-security` brings its own, created inside
+`init_app`. A `SiteApp` is built around a blueprint, so a shim would mean
+inventing one — and then inheriting a template namespace, a data directory and a
+log directory that nothing uses. See
 [ADR-0025](https://github.com/holdenweb/podpack/blob/main/adrs/0025-the-site-wires-its-own-extensions.md).
+Mail was the third such extension, until it became an app whose blueprint
+found a job: carrying the `mail` commands.
 
 ### The app's name is its blueprint's name
 
@@ -697,9 +698,12 @@ Login itself is podpack's, not yours to wire —
 [ADR-0033](https://github.com/holdenweb/podpack/blob/main/adrs/0033-login-is-core.md).
 `podpack.auth` ships the `User` and `Role` models, the datastore and the
 `is_admin` predicate `/_status` asks, and `create_app` installs them. A site
-writes nothing: no `models.py`, no `Security()`, no predicate. Mail and
-session policy remain the site's, under
-[ADR-0025](https://github.com/holdenweb/podpack/blob/main/adrs/0025-the-site-wires-its-own-extensions.md).
+writes nothing: no `models.py`, no `Security()`, no predicate. Session policy
+remains the site's, under
+[ADR-0025](https://github.com/holdenweb/podpack/blob/main/adrs/0025-the-site-wires-its-own-extensions.md),
+and so does what a mail failure says. Mail itself is an app
+([ADR-0041](https://github.com/holdenweb/podpack/blob/main/adrs/0041-sending-mail-is-an-app.md)),
+and a site whose login sends mail will not start without one installed.
 
 The three commands above are still flask-security's rather than podpack's,
 because they exist, validate the identity through the registration form and
