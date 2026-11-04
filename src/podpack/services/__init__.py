@@ -100,7 +100,10 @@ class CoreService:
     stores have one because both formats are parsed rather than streamed, so
     a truncated or corrupt archive fails here -- at the moment the backup is
     taken, when the original still exists -- instead of during the restore
-    that needed it."""
+    that needed it.
+
+    What it prints is kept: verify-backup.sh reads PostgreSQL's output as the
+    dump's table of contents."""
 
     dump_file: str = ""
     """What the snapshot is called inside a backup directory."""
@@ -186,9 +189,10 @@ POSTGRES = CoreService(
     # privilege over the rest of the database. Restoring ownerless hands
     # the schema to the admin role and breaks the next migration.
     dump='pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom',
-    # Custom format rather than SQL, because it makes verification free:
-    # `pg_restore --list` parses the entire archive, so a truncated one
-    # fails when the backup is taken rather than when it is needed.
+    # Custom format rather than SQL, because it makes verification cheap:
+    # pg_restore can read the archive right through with no database to
+    # restore into, so a truncated one fails when the backup is taken rather
+    # than when it is needed.
     restore=(
         'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
         " --clean --if-exists --exit-on-error"
@@ -200,10 +204,23 @@ POSTGRES = CoreService(
     #     failure and still exits 0, so a restore that restored nothing looks
     #     exactly like one that worked.
     dump_file="database.pgc",
-    verify="pg_restore --list",
-    #   ^ parses the whole archive and prints its table of contents, so it
-    #     fails on a truncated one; and the listing doubles as the evidence
-    #     that the dump holds table data rather than an empty schema.
+    verify=(
+        'f="$(mktemp)" || exit; '
+        'tee "$f" | pg_restore -f /dev/null && pg_restore --list "$f"; '
+        's=$?; rm -f "$f"; exit "$s"'
+    ),
+    #   ^ two reads, because the job has two halves. Restoring to /dev/null
+    #     reads every data block, from stdin, exactly as a real restore does,
+    #     so a dump cut off anywhere fails. `--list` alone, the check until
+    #     2026-11-04, reads only the table of contents at the head of the
+    #     archive: it passed dumps cut to half their length and to 99%, so
+    #     VERIFIED could stand over a backup whose restore stops partway.
+    #     The listing is still wanted, because verify-backup.sh counts its
+    #     TABLE DATA entries as the evidence that the dump holds data rather
+    #     than an empty schema. So it comes second, from the copy `tee` kept,
+    #     since stdin can be read only once; the copy lives in the
+    #     container's /tmp for the length of the check. One line, with no
+    #     tab: verify-backup.sh carries it through a tab-separated `read`.
 )
 
 MONGODB = CoreService(

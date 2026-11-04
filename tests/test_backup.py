@@ -503,7 +503,7 @@ def test_a_service_entry_carries_its_three_commands(
 
     assert service["dump"].startswith("pg_dump")
     assert service["restore"].startswith("pg_restore")
-    assert service["verify"] == "pg_restore --list"
+    assert service["verify"] == CATALOGUE["postgres"].verify
     assert service["file"] == "database.pgc"
 
 
@@ -744,6 +744,85 @@ def test_the_summary_names_where_the_backup_came_from(tmp_path: Path) -> None:
 
     assert "source directory: /tmp/restore-rehearsal" in out, out
     assert "from host:        opal17" in out, out
+
+
+# ---------------------------------------------------------------------------
+# What reading a dump "right through" has to mean.
+# ---------------------------------------------------------------------------
+
+# A dump of a real database: schema `app`, one table, 500 rows. Made by pg_dump
+# 16, so that every pg_restore from 16 on can read it, and piped to disk the way
+# backup.sh writes one. A dump written to a pipe carries no data offsets, so a
+# restore, and anything checking on its behalf, has to read it front to back.
+DUMP_FIXTURE = Path(__file__).parent / "data" / "database.pgc"
+
+
+@pytest.fixture
+def pg_restore() -> str:
+    """The real pg_restore, or a skip: nothing short of it can answer this."""
+    import shutil
+
+    found = shutil.which("pg_restore")
+    if found is None:
+        pytest.skip("needs PostgreSQL's pg_restore on PATH")
+    return found
+
+
+def _verify_postgres_dump(archive: bytes) -> tuple[int, bytes, bytes]:
+    """Run the catalogue's postgres `verify` as verify-backup.sh does.
+
+    `sh -c`, with the dump on stdin and stdout kept as the table of contents.
+    Fed through a pipe, as `podman compose exec -T` delivers it, because a file
+    on stdin is seekable and the stdin of a real restore never is.
+    """
+    import subprocess
+
+    done = subprocess.run(
+        ["sh", "-c", CATALOGUE["postgres"].verify], input=archive, capture_output=True
+    )
+    return done.returncode, done.stdout, done.stderr
+
+
+@pytest.mark.parametrize("kept", [0.5, 0.99])
+def test_a_truncated_database_dump_fails_verification(
+    pg_restore: str, kept: float
+) -> None:
+    """VERIFIED must not stand over a dump that cannot be restored.
+
+    `pg_restore --list`, the check until 2026-11-04, reads only the table of
+    contents at the head of the archive. A dump cut off anywhere after it --
+    half of one, or one missing only its last 1% -- listed clean, so the nightly
+    verification would pass a backup whose restore stops partway.
+    """
+    import subprocess
+
+    archive = DUMP_FIXTURE.read_bytes()
+    cut = archive[: int(len(archive) * kept)]
+
+    # The premise: the cut is past the table of contents, so it is exactly the
+    # case a listing cannot see. A cut inside it fails any check whatever, and
+    # a test built on one would prove nothing.
+    toc = subprocess.run([pg_restore, "--list"], input=cut, capture_output=True)
+    assert toc.returncode == 0 and b"TABLE DATA" in toc.stdout, toc.stderr
+
+    status, _, _ = _verify_postgres_dump(cut)
+    assert status != 0, f"a dump cut to {kept:.0%} of its length verified clean"
+
+
+def test_a_whole_database_dump_verifies_and_lists_its_table_data(
+    pg_restore: str,
+) -> None:
+    """The control for the test above, and the half of the contract it misses.
+
+    A verify that refused everything would pass that test. And verify-backup.sh
+    counts the `TABLE DATA` lines this prints as its evidence that the dump holds
+    data rather than an empty schema, so a verify that read the archive right
+    through and printed nothing would switch that check off without a word.
+    """
+    status, out, err = _verify_postgres_dump(DUMP_FIXTURE.read_bytes())
+
+    assert status == 0, err.decode()
+    assert out.count(b"TABLE DATA") == 1, out.decode()
 
 
 def _backup_script() -> str:
