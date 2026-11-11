@@ -157,7 +157,7 @@ services:
       # arguments on whitespace, so any argument containing spaces arrives
       # mangled. See container/healthcheck.py.
       test: ["CMD", "python", "/app/healthcheck.py"]
-      interval: 10s
+      interval: 300s
       timeout: 5s
       retries: 6
       start_period: 10s
