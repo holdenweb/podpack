@@ -221,16 +221,32 @@ def _report_unreachable_status(app: Flask) -> None:
         logger.debug("could not check for the %r role: %s", ADMIN_ROLE, exc)
         return
     if missing:
+        # A site package is the module gunicorn is pointed at, so `--app` can
+        # name it outright. Without one, `import_name` is podpack's own, and
+        # that is right only where podpack's bare factory *is* the site -- its
+        # own lab, under gunicorn or scripts/dev.sh. An app's dev site calls
+        # the factory from a module of its own with a `config_path`, so `--app
+        # podpack` there builds a different site, with no config, and dies on
+        # /etc/podpack/app.toml: a misleading hint is worse than a placeholder.
+        if app.import_name == __name__:
+            site, why = "<your site>", (
+                "\n<your site> is the module whose create_app built this site: "
+                "devsite for an app's dev site, podpack only in podpack's own "
+                "lab. It was built with no site_package, so podpack cannot tell."
+            )
+        else:
+            site, why = app.import_name, ""
         logger.warning(
             "no %r role exists, so /_status will answer 404 to everyone -- "
             "including you. Create it and grant it:\n"
             "    flask --app %s roles create %s\n"
-            "    flask --app %s roles add <email> %s",
+            "    flask --app %s roles add <email> %s%s",
             ADMIN_ROLE,
-            app.import_name,
+            site,
             ADMIN_ROLE,
-            app.import_name,
+            site,
             ADMIN_ROLE,
+            why,
         )
 
 

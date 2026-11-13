@@ -1113,6 +1113,42 @@ def test_a_missing_admin_role_says_so_at_boot(
     assert "roles add <email> admin" in caplog.text
 
 
+def test_the_admin_hint_names_the_site_package(
+    booted_twice: Callable[..., Flask],
+    site_package: Callable[[str, dict[str, str]], str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A site with a package of its own is the module gunicorn is pointed at,
+    so `--app` can name it outright -- holdenweb.com is told `--app holdenweb`.
+    Here to keep that when the no-package case below stops naming a module."""
+    site_package("mysite", {})
+    with caplog.at_level(logging.WARNING, logger="podpack"):
+        booted_twice(site_package="mysite")
+    assert "flask --app mysite roles create admin" in caplog.text
+    assert "flask --app mysite roles add <email> admin" in caplog.text
+    assert "<your site>" not in caplog.text
+
+
+def test_the_admin_hint_does_not_name_podpack_for_a_site_without_a_package(
+    booted_twice: Callable[..., Flask], caplog: pytest.LogCaptureFixture
+) -> None:
+    """With no `site_package` the only name podpack has is its own, and every
+    app's dev site is built that way. The hint used to fill it in regardless,
+    and `flask --app podpack` from an app's repository runs podpack's bare
+    factory instead of the dev site's -- no config path, so it dies with "host
+    configuration not mounted at /etc/podpack/app.toml", which says nothing
+    about roles. Hit from podpack-lablog's dev site on 2026-11-14.
+
+    So the hint names a placeholder and says why it cannot do better.
+    """
+    with caplog.at_level(logging.WARNING, logger="podpack"):
+        booted_twice()
+    assert "flask --app podpack" not in caplog.text
+    assert "flask --app <your site> roles create admin" in caplog.text
+    assert "flask --app <your site> roles add <email> admin" in caplog.text
+    assert "no site_package" in caplog.text
+
+
 def test_an_existing_admin_role_is_silent(
     booted_twice: Callable[..., Flask], caplog: pytest.LogCaptureFixture
 ) -> None:
