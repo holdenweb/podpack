@@ -159,5 +159,5 @@ services:
       test: ["CMD", "python", "/app/healthcheck.py"]
       interval: 300s
       timeout: 5s
-      retries: 6
+      retries: 2
       start_period: 10s
