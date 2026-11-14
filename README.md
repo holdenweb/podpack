@@ -1501,7 +1501,7 @@ of treating the tag as the delivery mechanism when it is only the packaging one.
 
 Almost nothing here needs publishing to be tested.
 
-**Library code.** `uv run pytest`, and `provoke-errors.py` for the failures the
+**Library code.** `uv run pytest`, and `tools/provoke-errors.py` for the failures the
 guides quote. This is the whole of it for anything that does not touch a file a
 site copies.
 
