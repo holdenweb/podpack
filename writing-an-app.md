@@ -898,7 +898,10 @@ chrome block, and it uses SQLite rather than PostgreSQL. Build a second one with
 a site package and a deliberately minimal `base.html` if either matters to you.
 And because `/_status` is operator-only, reaching the JSON above means creating
 an admin and signing in first — `creating-a-site.md` step 9 has the
-`flask users create` / `roles create admin` / `roles add` sequence.
+`flask users create` / `roles create admin` / `roles add` sequence. Write
+`--app devsite` wherever it says `--app mysite`; `--app podpack` would run
+podpack's bare factory, which has no config path and fails looking for
+`/etc/podpack/app.toml`.
 
 ---
 
