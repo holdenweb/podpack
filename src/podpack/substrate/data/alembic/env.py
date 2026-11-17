@@ -50,7 +50,11 @@ if config.config_file_name is not None:
 # next person to call set_main_option. The url never enters the ini instead,
 # which it never needed to: alembic.ini sets no `sqlalchemy.*` options at all,
 # so this was a round trip through a parser purely to read the value back out.
-db_url = os.environ.get("SQLALCHEMY_DATABASE_URI")
+#
+# The "" default is what types it `str` rather than `str | None`. The check
+# below narrows it only at module level, and run_migrations_online reads the
+# global as declared. An empty value is refused just as an absent one was.
+db_url = os.environ.get("SQLALCHEMY_DATABASE_URI", "")
 if not db_url:
     raise RuntimeError(
         "SQLALCHEMY_DATABASE_URI is not set. Migrations read it from the "

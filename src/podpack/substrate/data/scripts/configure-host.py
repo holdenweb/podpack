@@ -182,7 +182,8 @@ def report_example_values(env: Path, secrets_env: Path, set_here: dict[Path, lis
     example suggests. So this reports rather than judges, and leaves the
     exit code to the caller.
     """
-    credentials, others = [], []
+    credentials: list[str] = []
+    others: list[str] = []
     for target, example in ((secrets_env, "secrets.env.example"), (env, ".env.example")):
         if not target.exists():
             continue
