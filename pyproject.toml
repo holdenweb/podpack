@@ -66,7 +66,10 @@ module-name = "podpack"
 # app lives in ~/sites/podpack-demo, which is a site and installs two packages
 # from git the way any site does.
 [dependency-groups]
-dev = ["pytest>=8.0", "mypy>=1.11"]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.11",
+]
 
 [tool.mypy]
 # Annotations nobody checks are comments that look authoritative, so the
