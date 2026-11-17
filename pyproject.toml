@@ -71,13 +71,15 @@ dev = ["pytest>=8.0", "mypy>=1.11"]
 [tool.mypy]
 # Annotations nobody checks are comments that look authoritative, so the
 # checker is a dependency rather than something to remember to install.
+#
+# "src" takes in the substrate's Python too. It is shipped data, copied into
+# sites rather than imported from here, but every site runs it, and while it
+# was excluded, errors in it reached every site unseen (4417b1b). The repo-root
+# copies need no check of their own: a test pins them byte-identical to these.
 files = ["src", "tests"]
 # Flask-SQLAlchemy and flask-paranoid ship no stubs; missing imports would
 # otherwise drown the errors worth reading.
 ignore_missing_imports = true
-# The canonical substrate is shipped data, not importable code -- its env.py
-# and healthcheck.py are copied into sites, never imported from here.
-exclude = 'src/podpack/substrate/data/'
 
 [tool.pytest.ini_options]
 # Where the tests are, so a bare `pytest` does not walk the whole tree. Without
