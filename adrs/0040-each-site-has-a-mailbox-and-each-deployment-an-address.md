@@ -1,7 +1,6 @@
 # ADR-0040: Each site has a mailbox, and each deployment an address
 
-**Status:** Proposed — accepted once the sending app exists and a deployment
-sends through its own address.
+**Status:** Accepted
 
 **Date:** 2026-11-01
 
