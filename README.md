@@ -769,41 +769,25 @@ Writing one version's files while recording another's would leave the next
 
 ## Publishing
 
-```bash
-export UV_PUBLISH_TOKEN=pypi-...        # the project-scoped token, day to day
-python3 tools/publish.py --dry-run
-python3 tools/publish.py
-```
+A release reaches PyPI one way: a pushed release tag, acted on by
+`.github/workflows/publish.yml`
+([ADR-0042](adrs/0042-publishing-waits-for-ci.md)).
+[`release`](https://github.com/holdenweb/release) cuts it — bump, commit, tag
+`r<version>`, push — and from the tag on, the workflow decides:
 
-The token lives in the environment, never in an argument — arguments are
-visible in `ps`. `uv publish` reads `UV_PUBLISH_TOKEN` itself, so the script
-never handles the value.
+1. It runs `ci.yml` on the tagged commit: mypy, the tests with their PostgreSQL
+   service, and the substrate check, exactly as every push gets them. A failure
+   skips the rest, and PyPI never hears of the tag.
+2. It checks that the tag names, as a string, the version `pyproject.toml`
+   declares, and that it is not a `.dev` or `+local` version — with the release
+   tool's own `verify_tag.py`, fetched at a pinned commit.
+3. It builds into a clean checkout and uploads through PyPI's trusted
+   publishing, so there is no token to leak. A new project's first release needs
+   a *pending* publisher registered on PyPI beforehand.
 
-**Scope the token to this project.** PyPI offers a project scope only for a
-project that already exists, so the *first* upload needs an account-scoped
-token — which is a good reason for the environment rather than a config file,
-because it can be supplied for that one command and never become the default:
-
-```bash
-UV_PUBLISH_TOKEN=pypi-account-scoped python3 tools/publish.py
-```
-
-Then create a project-scoped token, revoke the account-scoped one, and export
-the narrow one for everything after. (An inline assignment lands in shell
-history; prefix the line with a space if your shell is set to ignore those, or
-revoke the broad token straight afterwards — which you are doing anyway.)
-
-On CI, trusted publishing avoids tokens entirely — pass `--assume-credentials`,
-since keyring and OIDC cannot be detected from here.
-
-It builds into a clean `dist/` and refuses to upload unless exactly one version
-is present there, that version matches `pyproject.toml`, the working tree is
-clean, the `r<version>` tag exists, and the version is not already on PyPI.
-
-The single-version guard is the one worth knowing about: `uv publish` uploads
-`dist/*`, that directory accumulates, and this repository sat with
-`podpack-0.4.0` in `dist/` while `pyproject.toml` said 0.7.3. Publishing then
-would have shipped 0.4.0, and PyPI does not let you take a version back.
+`tools/publish.py`, which uploaded from a laptop with a token, is retired. A
+route to PyPI that never met CI would leave the gate above a default rather
+than a guarantee.
 
 ### A release that changes the substrate needs one more step first
 
@@ -823,14 +807,15 @@ uv sync                                    # the installed metadata becomes the 
 uv run podpack substrate upgrade --dir .   # records it, and re-baselines the changed files
 git add pyproject.toml substrate.json      # and the substrate files you changed
 git commit
-git tag r<version>                         # publish.py requires this tag to exist
+git tag r<version>
 ```
 
-Because `publish.py` refuses to upload unless the tree is clean and `r<version>`
-exists, the refresh necessarily happens first — which is the point. A release
-that touches no substrate file needs no `substrate upgrade`; running `substrate
-status --check` before tagging is cheap insurance that the record and the
-package still agree either way.
+The publish workflow runs CI on the tagged commit, substrate check included, so
+a release whose substrate files moved without `substrate upgrade` recording
+them is refused before anything is built. A release that touches no substrate
+file needs no `substrate upgrade`; running `substrate status --check` before
+tagging is cheap insurance either way — cheaper than a refused release and a
+tag to delete.
 
 ## Getting it, and keeping it current
 
