@@ -99,7 +99,7 @@
     },
     "compose.yaml": {
       "class": "verbatim",
-      "sha256": "856eea220625a043a7652b3b3ee0f8eb19c798f64a1c40755df8f40f989c6fef"
+      "sha256": "9820926beff80ccb1ced24abdfbe29dfae9d071d1cc69003de33d3a92145996a"
     },
     "config/mongod.conf": {
       "class": "verbatim",
@@ -119,7 +119,7 @@
     },
     "container/healthcheck.py": {
       "class": "verbatim",
-      "sha256": "4a82ddfe742d61d7d48ed322fa85573ece69e6672fe0d519a978703d22215052"
+      "sha256": "abeb30a903e646320222ffa585f2838127ad6528a090665187252e715bac182b"
     },
     "db-init/01-create-app-user.sh": {
       "class": "verbatim",

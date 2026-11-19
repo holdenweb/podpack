@@ -158,6 +158,8 @@ services:
       # mangled. See container/healthcheck.py.
       test: ["CMD", "python", "/app/healthcheck.py"]
       interval: 300s
-      timeout: 5s
+      # Above healthcheck.py's READY_WITHIN: its first check waits for
+      # gunicorn to start listening, and podman kills a check at this.
+      timeout: 30s
       retries: 2
       start_period: 10s
