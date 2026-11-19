@@ -1,4 +1,5 @@
-# Publish to PyPI when a release tag is pushed.
+# Publish to PyPI when a release tag is pushed -- if the tagged commit passes
+# this repository's CI.
 #
 # No secret appears in this file and none is configured for it. Authentication
 # is PyPI's trusted publishing: `id-token: write` lets the runner mint a
@@ -10,20 +11,32 @@
 # *pending* publisher registered on PyPI beforehand -- which is why none of
 # these packages ever needs an account-scoped token.
 #
-# Releasing is therefore: bump the version, commit, tag `r<version>`, push the
-# tag. The checks below are the ones tools/publish.py makes from a laptop; a
-# release that cannot pass them should not exist, and finding that out in CI is
-# cheaper than finding it out on an index that never forgets.
+# The release tool cuts a release -- bump, commit, tag `r<version>`, push --
+# and the pushed tag is all this file is told (the tool's ADR-0022). From there
+# it runs ci.yml on the tagged commit and publishes only if that passes, so a
+# release must pass exactly what CI checks, by construction. Until 2026-11-19
+# this file ran pytest alone, and podpack r0.10.1 reached PyPI from a commit
+# whose CI had failed, on a check that only CI made.
 
 name: publish
 
 on:
   push:
     tags: ["r*"]
+  # Run by hand, it publishes only from a release tag: dispatched on a
+  # branch, the tag check below refuses the branch's name.
   workflow_dispatch:
 
 jobs:
+  ci:
+    # This repository's own checks, on the tagged commit. A failure here skips
+    # the publish job, and PyPI never hears of the tag.
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   publish:
+    needs: ci
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -38,30 +51,23 @@ jobs:
         with:
           enable-cache: true
 
-      - name: The tag and the package must agree
+      - name: The tag names exactly what this commit declares
+        # The release tool's own check, fetched at a pinned commit so it cannot
+        # change underneath a release: the tag must name pyproject.toml's
+        # version as a string, and a .dev or +local version -- one that marks
+        # its commit as unreleased -- is refused outright. The shell comparison
+        # this replaced caught the first and not the second.
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME#r}"
-          version="$(uv run --no-project python -c '
-          import tomllib, pathlib
-          print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])
-          ')"
-          echo "tag ${tag}, pyproject ${version}"
-          # Pushing r0.8.0 while pyproject says 0.7.3 publishes the wrong
-          # version under the right name, and PyPI keeps whatever it accepts.
-          [ "$tag" = "$version" ] || {
-            echo "::error::tag r${tag} does not match pyproject version ${version}"
-            exit 1
-          }
-
-      - name: Tests
-        # A release that fails its own tests should not exist. Integration
-        # tests need a running site and skip themselves without one.
-        run: uv run pytest -q
+          curl -fsSL -o "$RUNNER_TEMP/verify_tag.py" \
+            https://raw.githubusercontent.com/holdenweb/release/d82a039efa3885d701ff9fda8201eeb92ec9e61e/.github/scripts/verify_tag.py
+          uv run --no-project --with packaging python "$RUNNER_TEMP/verify_tag.py"
 
       - name: Build
-        # Into a clean checkout, so the single-version problem that guards
-        # tools/publish.py cannot arise here.
+        # Into a clean checkout, so no artefact from an earlier build can ship
+        # beside this one.
         run: uv build
 
       - name: Publish

@@ -1,25 +1,30 @@
-# Run the checks on every push and pull request.
+# Run the checks on every push to a branch and every pull request -- and on
+# every release tag, when publish.yml calls this workflow and publishes only if
+# it passes.
 #
-# publish.yml runs the tests too, but only when a release tag is pushed -- which
-# is the worst moment to learn a test fails, on the one index that never forgets
-# a version. This runs them while a fix is still cheap. It also runs the two
-# checks a release never did: mypy (configured, never gated) and whether the
-# substrate record is current.
-#
-# The one that matters most here cannot run in publish.yml at all:
-# test_migrate_persists needs a real PostgreSQL, and the service below is the
-# only place the suite ever gets one. Without it that test skips, and the silent
-# migration-rollback it guards goes unseen exactly as it did the night it shipped.
+# So a release gets everything below, which it never did while publish.yml ran
+# pytest alone: mypy, whether the substrate record is current -- the check
+# podpack r0.10.1 reached PyPI past -- and test_migrate_persists, which needs a
+# real PostgreSQL. The service below is the only place the suite ever gets one.
+# Without it that test skips, and the silent migration-rollback it guards goes
+# unseen exactly as it did the night it shipped.
 
 name: ci
 
 on:
   push:
+    # Branches only. A release tag reaches this workflow through publish.yml,
+    # so a tag push no longer runs it twice.
+    branches: ["**"]
   pull_request:
+  workflow_call:
 
 # A newer push to the same branch makes an in-flight run pointless; drop it.
+# github.workflow names the caller when publish.yml runs this, so a release's
+# run has a group of its own: no other run on the tag can cancel it, which
+# would skip the publish without a word.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -61,7 +66,7 @@ jobs:
       - name: Tests
         # The URI turns on test_migrate_persists against the service above; the
         # rest of the suite is engine-neutral and does not read it. `uv run`
-        # syncs the dev group first, exactly as publish.yml relies on.
+        # syncs the dev group first.
         env:
           PODPACK_TEST_DATABASE_URI: postgresql+psycopg2://test-user:test-pw@localhost:5432/test-db
         run: uv run pytest -q
