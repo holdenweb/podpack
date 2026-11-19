@@ -446,8 +446,14 @@ git init                         # optional -- see below
 
 ```
 mysite-postgres-1   Up 21 seconds (healthy)
-mysite-web-1        Up 14 seconds (healthy)
+mysite-web-1        Up 14 seconds (starting)
 ```
+
+`web` says `starting` for about five minutes. Its healthcheck runs every 300s,
+and podman runs the first one as the container starts, before gunicorn is
+listening, so `healthy` comes with the second. Nothing waits on it: every
+ordering gate is on a store's health or a one-shot's completion, never on
+`web`.
 
 `scripts/up.sh` always rebuilds and stamps the commit into the image, which
 `/_status` reports as `build_commit`. Outside a git repository it says

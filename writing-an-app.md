@@ -383,7 +383,7 @@ class Links(SiteApp):
 ```
 
 `healthz()` runs on every `/healthz`, which the container healthcheck hits
-every ten seconds — so keep it cheap, and remember it may be the thing
+every five minutes — so keep it cheap, and remember it may be the thing
 standing between a deployment and a rollback. It may do I/O: pinging the
 store you depend on is the whole point, and podpack reports the elapsed
 milliseconds so a slow check shows up as slow rather than as a mystery.

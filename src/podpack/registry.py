@@ -224,7 +224,7 @@ class SiteApp:
         """Override to say whether this app is working.
 
         Called in an app context on every `/healthz`, which the container
-        healthcheck hits every ten seconds -- so keep it cheap. It may do
+        healthcheck hits every five minutes -- so keep it cheap. It may do
         I/O (pinging the store you depend on is the whole point), and
         podpack reports how long it took so a slow check is visible rather
         than mysterious. An exception here is caught and reported as an

@@ -12,7 +12,7 @@ they bite:
 
 - Every request whose `Host` differs from it logs `UserWarning: Current server
   name '...' doesn't match configured server name '...'`. The container
-  healthcheck hits `127.0.0.1:8000` every ten seconds, so a site with a public
+  healthcheck hits `127.0.0.1:8000` every five minutes, so a site with a public
   `SERVER_NAME` would warn on each one, for ever.
 - With `subdomain_matching=True` a mismatched `Host` becomes a 404 -- measured,
   and the healthcheck is exactly such a request. That is opt-in rather than the
