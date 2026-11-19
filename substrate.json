@@ -78,7 +78,7 @@
     },
     "alembic/env.py": {
       "class": "verbatim",
-      "sha256": "87d9ad1abd0a13c7a88eee4bfa21dd7fd3fbfac03aa7cadd2e6286d0c4917829"
+      "sha256": "aba75c9d681ec6fa25b3660a4ac81a891c5282fa533a5ff186e8a98b22af4f08"
     },
     "alembic/script.py.mako": {
       "class": "verbatim",
@@ -99,7 +99,7 @@
     },
     "compose.yaml": {
       "class": "verbatim",
-      "sha256": "712c4295ca33f58fef777c570fda9b80f8ba24b9b304b46d82d4c194c4bb1350"
+      "sha256": "856eea220625a043a7652b3b3ee0f8eb19c798f64a1c40755df8f40f989c6fef"
     },
     "config/mongod.conf": {
       "class": "verbatim",
@@ -140,7 +140,7 @@
     },
     "scripts/configure-host.py": {
       "class": "verbatim",
-      "sha256": "65204754991225ee9b164a78db347e3764a58ebd0aa62d180da21709e382d211"
+      "sha256": "910c59b89eb51324185881c8b83d1f9a946e585f438b35450427ee7388e6096d"
     },
     "scripts/dev.sh": {
       "class": "rendered",
@@ -176,6 +176,6 @@
     "site_package": "podpack",
     "web_port": "8458"
   },
-  "podpack_version": "0.9.5+dev",
+  "podpack_version": "0.10.1+dev",
   "substrate_schema": 1
 }
