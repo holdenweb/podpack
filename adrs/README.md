@@ -92,3 +92,9 @@ here as against in `README.md` or `claude.md`.
 | [ADR-0040](0040-each-site-has-a-mailbox-and-each-deployment-an-address.md) | **Each site has a mailbox, and each deployment an address.** `${SITE}-admin` in a mail domain delegated to the host — `mail.holdenweb.com`, where Opalstack publishes MX, SPF, DKIM and DMARC itself, so no site or deployment needs DNS work — with `${SITE}-stag@` and `${SITE}-prod@` delivering into it. A deployment sends from its own address and picks out its own mail by `X-Original-To`. The apps speak SMTP and IMAP and know nothing of the provider; `scripts/provision-mail.py` makes the mailbox through Opalstack's API, and not with the published library, which logs the password. The trade: staging holds production's credential. |
 | [ADR-0041](0041-sending-mail-is-an-app.md) | **Sending mail is an app.** Supersedes ADR-0025's mail clause. `podpack-mail`, app `mail`: flask-mailman configured from `[apps.mail]` and the deployment's environment, `MAIL_PASSWORD` in `needs_secrets`, implicit TLS only because flask-mailman's STARTTLS verifies no certificate, and `mail check` carried on the blueprint — which is the job ADR-0025 said a mail app's blueprint would not have. What a failure says stays the site's (`PODPACK_MAIL_UTIL_CLS`). podpack refuses to start a site whose login sends mail with nothing installed to send it, from a table of flask-security's own `send_mail` call sites. |
 
+
+## Releasing
+
+| | |
+| --- | --- |
+| [ADR-0042](0042-publishing-waits-for-ci.md) | **Publishing waits for CI.** `publish.yml` runs `ci.yml` (`workflow_call`) on the tagged commit and publishes only if it passes; the tag is checked by the release tool's `verify_tag.py` at a pinned commit, which refuses `.dev` and `+local` versions; `tools/publish.py` is retired, so the workflow is the only route to PyPI. r0.10.1 went out from a red commit because the two workflows were unconnected and publish's gate was a subset of CI's. |
