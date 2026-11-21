@@ -45,9 +45,12 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v5
+      # An exact release where checkout takes a major: setup-uv stopped
+      # publishing floating tags at v8, so `@v10` would not resolve. Its
+      # releases are immutable, so this tag cannot be moved under us either.
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
 
